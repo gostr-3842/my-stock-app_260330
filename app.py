@@ -13,13 +13,6 @@ st.set_page_config(page_title="AI 실시간 주식 리포트", page_icon="📈",
 
 st.markdown("""
 <style>
-
-    /* 매수/매도 뱃지 */
-    .badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; float: right; margin-top: 5px; }
-    .badge-buy { background-color: #10b981; color: #000; }
-    .badge-sell { background-color: #ef4444; color: #fff; }
-    .badge-hold { background-color: #4b5563; color: #fff; }
-    
     /* 전체 배경 및 폰트 */
     .stApp { background-color: #0b0e14; color: #d1d5db; font-family: 'Pretendard', sans-serif; }
     
@@ -51,7 +44,7 @@ st.markdown("""
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
     
-    /* 지지/저항 피벗 박스 스타일 (스샷 완벽 구현) */
+    /* 지지/저항 피벗 박스 스타일 */
     .pivot-box { border-radius: 8px; padding: 12px 0; text-align: center; display: flex; flex-direction: column; justify-content: center; border: 1px solid #2d3748;}
     .pv-title { font-size: 0.75rem; margin-bottom: 4px; opacity: 0.8;}
     .pv-val { font-size: 1.1rem; font-weight: 700; }
@@ -67,6 +60,12 @@ st.markdown("""
     .scenario-box { border-radius: 8px; padding: 15px; flex: 1; border: 1px solid; }
     .box-bull { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.3); }
     .box-bear { background-color: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.3); }
+
+    /* 매수/매도 뱃지 */
+    .badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; float: right; margin-top: 5px; }
+    .badge-buy { background-color: #10b981; color: #000; }
+    .badge-sell { background-color: #ef4444; color: #fff; }
+    .badge-hold { background-color: #4b5563; color: #fff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -102,16 +101,13 @@ def load_stock_data(sym):
         try:
             tkr = yf.Ticker(sym)
             df = tkr.history(period="1y", interval="1d")
-            info = tkr.info # 목표가 등 부가정보 가져오기
+            info = tkr.info
             if df is not None and not df.empty: break
         except Exception: time.sleep(1)
     
     if df is not None and not df.empty:
-        # 지표 계산 로직
         df['MA20'] = df['Close'].rolling(20).mean()
         df['MA50'] = df['Close'].rolling(50).mean()
-        df['MA200'] = df['Close'].rolling(200).mean()
-        df['Vol20'] = df['Volume'].rolling(20).mean()
         
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean()
@@ -121,11 +117,6 @@ def load_stock_data(sym):
         df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
         df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
         
-        df['BB_Mid'] = df['Close'].rolling(20).mean()
-        df['BB_Std'] = df['Close'].rolling(20).std()
-        df['BB_Upper'] = df['BB_Mid'] + (df['BB_Std'] * 2)
-        df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
-        
         return df, info
     return None, {}
 
@@ -134,7 +125,8 @@ def load_stock_data(sym):
 def get_ai_scenarios(q, curr, rsi, macd):
     prompt = f"""종목:{q}, 현재가:{curr}, RSI:{rsi:.1f}. 
     반드시 JSON 포맷으로 작성. 
-    항목: 
+    항목:
+    decision ('매수', '매도', '관망' 중 1개),
     short_term (단기 전망 및 박스권 예상 2문장 내외), 
     mid_term (중장기 펀더멘탈 및 시황 전망 2문장 내외), 
     bull (상승 시나리오 요약 및 이유 2문장 내외), 
@@ -162,7 +154,7 @@ def get_ai_scenarios(q, curr, rsi, macd):
             return json.loads(jt[jt.find('{'):jt.rfind('}')+1])
         except: continue
     
-    return {"short_term":"API 점검 중입니다.", "mid_term":"잠시 후 갱신해 주세요.", "bull":"-", "bear":"-"}
+    return {"decision":"관망", "short_term":"API 점검 중입니다.", "mid_term":"잠시 후 갱신해 주세요.", "bull":"-", "bear":"-"}
 
 # 📊 5. 메인 UI 렌더링
 with st.spinner("VIP 리포트 데이터 수집 중..."):
@@ -184,11 +176,15 @@ with st.spinner("VIP 리포트 데이터 수집 중..."):
         target_price = info.get('targetMeanPrice', 0)
         target_pct = ((target_price - curr_price)/curr_price)*100 if target_price else 0
         
-        # --- UI 시작 ---
-        # [타이틀 및 매수/매도 뱃지]
+        rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+        macd_val = last['MACD'] if not pd.isna(last['MACD']) else 0
+
+        # 💡 [핵심 버그 수정] UI 그리기 전에 AI 데이터를 먼저 불러옵니다!
+        ai_data = get_ai_scenarios(search_query, curr_price, rsi_val, macd_val)
         decision = ai_data.get('decision', '관망')
         badge_cls = "badge-buy" if decision == "매수" else ("badge-sell" if decision == "매도" else "badge-hold")
         
+        # --- UI 시작 ---
         st.markdown(f"""
             <span class="badge {badge_cls}">{decision}</span>
             <h2 style="margin:0;">{search_query} <span style='font-size:1rem;color:#6b7280;font-weight:normal;'>{symbol}</span></h2>
@@ -235,7 +231,6 @@ with st.spinner("VIP 리포트 데이터 수집 중..."):
         # [추세 분석]
         st.markdown("<div class='section-title'>추세 분석 · 이동평균</div>", unsafe_allow_html=True)
         
-        # 파이썬으로 직접 추세 판별 로직
         ma_status = "단기 상승 추세" if curr_price > last['MA20'] else "단기 하락 추세"
         ma_color = "dot-green" if curr_price > last['MA20'] else "dot-red"
         
@@ -261,16 +256,12 @@ with st.spinner("VIP 리포트 데이터 수집 중..."):
 
         # [모멘텀 지표]
         st.markdown("<div class='section-title'>모멘텀 지표</div>", unsafe_allow_html=True)
-        rsi_val = last['RSI']
-        if pd.isna(rsi_val): rsi_val = 50
         
         if rsi_val > 70: r_txt, r_dot, r_desc = "과매수 구간", "dot-red", "RSI 과매수 수준. 단기 고점 도달로 인한 차익 실현 주의."
         elif rsi_val < 30: r_txt, r_dot, r_desc = "과매도 구간", "dot-green", "RSI 과매도 수준. 단기 기술적 반등 가능성 존재."
         else: r_txt, r_dot, r_desc = "중립 수준", "dot-yellow", "방향성 탐색 중. 뚜렷한 과열이나 침체 없는 상태."
         
-        macd_val = last['MACD']
-        sig_val = last['MACD_Signal']
-        if pd.isna(macd_val): macd_val, sig_val = 0, 0
+        sig_val = last['MACD_Signal'] if not pd.isna(last['MACD_Signal']) else 0
         
         m_txt = "매수 신호 (골든크로스)" if macd_val > sig_val else "매도 신호 (데드크로스)"
         m_dot = "dot-green" if macd_val > sig_val else "dot-red"
@@ -313,9 +304,8 @@ with st.spinner("VIP 리포트 데이터 수집 중..."):
         </div>
         """, unsafe_allow_html=True)
 
-        # [AI 리포트 호출 및 렌더링]
+        # [AI 리포트 렌더링]
         st.markdown("<div class='section-title'>투자 전망 및 시나리오 (AI 전문 분석)</div>", unsafe_allow_html=True)
-        ai_data = get_ai_scenarios(search_query, curr_price, rsi_val, macd_val)
         
         st.markdown(f"""
         <div class="vip-card" style="margin-bottom:15px; padding:20px;">
