@@ -128,7 +128,7 @@ else:
     
     반드시 아래 JSON 형식으로만 응답해. (다른 말은 절대 쓰지 마)
     {{
-      "decision": "매수", // 매수, 매도, 관망 중 택 1
+      "decision": "매수",
       "short_term": "단기 전망 1줄",
       "mid_term": "중기 전망 1줄",
       "bull": "강세 시나리오 1줄",
@@ -137,17 +137,32 @@ else:
     """
     
     ai_data = {"decision": "분석중", "short_term": "-", "mid_term": "-", "bull": "-", "bear": "-"}
+    
     try:
-        res = model.generate_content(prompt)
-        # JSON 텍스트 추출 (```json ... ``` 찌꺼기 제거)
-        json_text = re.sub(r'```[a-zA-Z]*\n|```', '', res.text).strip()
-        ai_data = json.loads(json_text)
+        # 💡 가장 안정적인 1.5 버전 모델로 강제 고정
+        model_stable = genai.GenerativeModel('gemini-1.5-flash')
+        res = model_stable.generate_content(prompt)
+        
+        # 💡 AI가 앞뒤로 헛소리를 섞어놔도, '{' 부터 '}' 까지만 정확히 파내는 수술 작업
+        clean_text = res.text.replace('```json', '').replace('```JSON', '').replace('```', '').strip()
+        start_idx = clean_text.find('{')
+        end_idx = clean_text.rfind('}') + 1
+        
+        if start_idx != -1 and end_idx != 0:
+            clean_text = clean_text[start_idx:end_idx]
+            ai_data = json.loads(clean_text)
+        else:
+            raise ValueError("JSON 형식을 찾을 수 없음")
+            
     except Exception as e:
-        pass # 에러나면 기본값 사용
+        # 에러가 나면 숨기지 않고 화면에 띄워서 우리가 볼 수 있게 만듦
+        st.error(f"⚠️ AI 분석 에러 원인: {e}")
+        if 'res' in locals():
+            st.warning(f"AI가 보낸 원본 메시지: {res.text}")
 
     # 뱃지 색상 설정
     badge_cls = "badge-buy" if ai_data['decision'] == "매수" else ("badge-sell" if ai_data['decision'] == "매도" else "badge-hold")
-
+    
     # ==========================================
     # 🖥️ 화면 렌더링 (HTML/CSS 주입)
     # ==========================================
