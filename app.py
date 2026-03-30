@@ -120,53 +120,59 @@ else:
     sign = "+" if change_val > 0 else ""
 
     # ==========================================
-    # 🤖 AI 분석 요청 (JSON 포맷 강제 + 모델 자동 탐색)
+    # 🤖 AI 분석 요청 (캐싱 + 자동 우회 시스템)
     # ==========================================
-    prompt = f"""
-    너는 최고 수준의 애널리스트야. '{search_query}' 종목 데이터를 분석해.
-    현재가: {curr_price}, 20일선: {float(last['MA20'])}, RSI: {float(last['RSI'])}, MACD: {float(last['MACD'])}
     
-    반드시 아래 JSON 형식으로만 응답해. (다른 말은 절대 쓰지 마)
-    {{
-      "decision": "매수",
-      "short_term": "단기 전망 1줄",
-      "mid_term": "중기 전망 1줄",
-      "bull": "강세 시나리오 1줄",
-      "bear": "약세 시나리오 1줄"
-    }}
-    """
-    
-    ai_data = {"decision": "분석중", "short_term": "-", "mid_term": "-", "bull": "-", "bear": "-"}
-    
-    try:
-        # 💡 치트키: 구글 서버에 접속해서 '현재 내 API 키로 쓸 수 있는' 모델 목록을 자동 검색!
-        valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    # 캐싱 함수: 10분(600초) 동안 동일한 결과 유지하여 API 호출 횟수 아낌
+    @st.cache_data(ttl=600)
+    def get_ai_analysis(query, curr, ma20, rsi, macd):
+        prompt = f"""
+        너는 최고 수준의 애널리스트야. '{query}' 종목 데이터를 분석해.
+        현재가: {curr}, 20일선: {ma20}, RSI: {rsi}, MACD: {macd}
         
-        if not valid_models:
-            raise ValueError("사용 가능한 제미나이 모델이 없습니다. API 키 상태를 확인해주세요.")
-            
-        # 검색된 모델 중 가장 첫 번째 모델을 자동으로 선택해서 쓴다!
-        auto_model_name = valid_models[0]
-        model_stable = genai.GenerativeModel(auto_model_name)
+        반드시 아래 JSON 형식으로만 응답해. (다른 말은 절대 쓰지 마)
+        {{
+          "decision": "매수",
+          "short_term": "단기 전망 1줄",
+          "mid_term": "중기 전망 1줄",
+          "bull": "강세 시나리오 1줄",
+          "bear": "약세 시나리오 1줄"
+        }}
+        """
         
-        res = model_stable.generate_content(prompt)
+        # 💡 번갈아 가며 투입될 모델 명단
+        fallback_models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
         
-        # 💡 AI가 앞뒤로 헛소리를 섞어놔도, '{' 부터 '}' 까지만 정확히 파내는 수술 작업
-        clean_text = res.text.replace('```json', '').replace('```JSON', '').replace('```', '').strip()
-        start_idx = clean_text.find('{')
-        end_idx = clean_text.rfind('}') + 1
+        for m_name in fallback_models:
+            try:
+                model = genai.GenerativeModel(m_name)
+                res = model.generate_content(prompt)
+                
+                # JSON 파싱 (찌꺼기 제거)
+                clean_text = res.text.replace('```json', '').replace('```JSON', '').replace('```', '').strip()
+                start_idx = clean_text.find('{')
+                end_idx = clean_text.rfind('}') + 1
+                
+                if start_idx != -1 and end_idx != 0:
+                    return json.loads(clean_text[start_idx:end_idx])
+            except:
+                continue # 에러 나면 다음 모델로 자동 패스
         
-        if start_idx != -1 and end_idx != 0:
-            clean_text = clean_text[start_idx:end_idx]
-            ai_data = json.loads(clean_text)
-        else:
-            raise ValueError("JSON 형식을 찾을 수 없음")
-            
-    except Exception as e:
-        # 에러가 나면 숨기지 않고 화면에 띄워서 우리가 볼 수 있게 만듦
-        st.error(f"⚠️ AI 분석 에러 원인: {e}")
-        if 'valid_models' in locals():
-            st.info(f"💡 현재 사용 가능한 모델 목록: {valid_models}")
+        return None # 모든 모델 실패 시
+
+    # 함수 실행
+    ai_data = get_ai_analysis(
+        search_query, 
+        curr_price, 
+        float(last['MA20']), 
+        float(last['RSI']), 
+        float(last['MACD'])
+    )
+
+    # 결과값이 없을 때 기본값 처리
+    if ai_data is None:
+        ai_data = {"decision": "확인불가", "short_term": "API 한도 초과", "mid_term": "잠시 후 시도", "bull": "-", "bear": "-"}
+        st.warning("⚠️ 모든 AI 모델의 호출 한도가 일시적으로 초과되었습니다. 잠시 후 다시 시도해 주세요.")
 
     # 뱃지 색상 설정
     badge_cls = "badge-buy" if ai_data['decision'] == "매수" else ("badge-sell" if ai_data['decision'] == "매도" else "badge-hold")
