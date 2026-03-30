@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
-import google.generativeai as genai
+from google import genai # 👈 구글 최신 간판으로 교체!
 from groq import Groq
 import json
 import re
@@ -43,14 +43,13 @@ col_search, col_btn = st.columns([4, 1])
 with col_search:
     search_query = st.text_input("종목명/티커 검색", "TIGER 반도체TOP10", label_visibility="collapsed")
 with col_btn:
-    # 💡 갱신 버튼을 누르면 캐시를 무시하고 새로고침하는 기능은 빼고, 자연스럽게 10분 주기로 돌아가게 함
     st.button("🔄 갱신")
 
 clean_query = search_query.replace(" ", "").upper()
 clean_map = {key.replace(" ", "").upper(): value for key, value in SYMBOL_MAP.items()}
 symbol = clean_map.get(clean_query, search_query)
 
-# 🛡️ [캐싱 적용] 1. 야후 파이낸스 데이터 10분 동안 저장 (야후 차단 완벽 방어)
+# 🛡️ [캐싱 적용] 1. 야후 파이낸스 데이터 10분 동안 저장
 @st.cache_data(ttl=600)
 def load_stock_data(sym):
     df = None
@@ -70,7 +69,7 @@ def load_stock_data(sym):
         return df
     return None
 
-# 🛡️ [캐싱 적용] 2. 하이브리드 AI 분석 10분 동안 저장 (API 한도 방어)
+# 🛡️ [캐싱 적용] 2. 하이브리드 AI 분석 10분 동안 저장 (최신 SDK 적용)
 @st.cache_data(ttl=600)
 def get_hybrid_analysis(q, curr, ma20, rsi, macd):
     prompt = f"종목:{q},가:{curr},20선:{ma20},RSI:{rsi},MACD:{macd}. JSON: decision(매수/매도/관망), short_term, mid_term, bull, bear. 한국어 답변."
@@ -79,8 +78,8 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
     groq_key = st.secrets.get("GROQ_API_KEY")
     if groq_key:
         try:
-            client = Groq(api_key=groq_key)
-            completion = client.chat.completions.create(
+            groq_client = Groq(api_key=groq_key)
+            completion = groq_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model="llama-3.3-70b-specdec",
                 response_format={"type": "json_object"}
@@ -88,15 +87,17 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
             return json.loads(completion.choices[0].message.content)
         except: pass
 
-    # [Gemini 시도]
+    # [Gemini 시도 - 최신 구글 genai 클라이언트 방식]
     gemini_keys = [st.secrets.get("GEMINI_API_KEY_1"), st.secrets.get("GEMINI_API_KEY_2")]
     for k in [gk for gk in gemini_keys if gk]:
         try:
-            genai.configure(api_key=k)
+            client = genai.Client(api_key=k)
             for m_name in ['gemini-2.0-flash', 'gemini-1.5-flash']:
                 try:
-                    model = genai.GenerativeModel(m_name)
-                    res = model.generate_content(prompt)
+                    res = client.models.generate_content(
+                        model=m_name,
+                        contents=prompt,
+                    )
                     jt = re.sub(r'```[a-zA-Z]*\n|```', '', res.text).strip()
                     return json.loads(jt[jt.find('{'):jt.rfind('}')+1])
                 except: continue
