@@ -82,18 +82,34 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
         except: continue
     return None
 
-# 📊 4. 데이터 로드 보강
+# 📊 4. 데이터 로드 보강 (야후 파이낸스 차단 우회 로직)
 with st.spinner(f"'{symbol}' 데이터 분석 중..."):
-    # 최신 데이터를 가져오기 위해 period를 1y로 설정
-    df = yf.download(symbol, period="1y", interval="1d", progress=False)
+    import time
     
+    df = None
+    # 3번까지 재시도 (야후 차단 대비)
+    for i in range(3):
+        try:
+            df = yf.download(symbol, period="1y", interval="1d", progress=False, timeout=10)
+            if df is not None and not df.empty:
+                break
+            time.sleep(1) # 1초 쉬었다가 다시 시도
+        except:
+            time.sleep(1)
+            continue
+            
     if df is not None and not df.empty:
-        # 멀티인덱스 컬럼 정리 (yfinance 최신버전 대응)
+        # 멀티인덱스 컬럼 정리
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
             
-        # 지표 계산
+        # 데이터가 가끔 float으로 안 들어오는 경우 대비
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+        df = df.dropna(subset=['Close']) # 빈 데이터 삭제
+
+        # --- 이후 지표 계산 로직은 동일 ---
         df['MA20'] = df['Close'].rolling(20).mean()
+        # ... (이후 코드 생략, 기존과 동일) ...
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
