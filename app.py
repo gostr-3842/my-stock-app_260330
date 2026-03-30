@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
-from google import genai # 👈 구글 최신 간판으로 교체!
+from google import genai
 from groq import Groq
 import json
 import re
@@ -69,10 +69,11 @@ def load_stock_data(sym):
         return df
     return None
 
-# 🛡️ [캐싱 적용] 2. 하이브리드 AI 분석 10분 동안 저장 (최신 SDK 적용)
+# 🛡️ [캐싱 적용] 2. 하이브리드 AI 분석 10분 동안 저장 (에러 로그 추적기 탑재!)
 @st.cache_data(ttl=600)
 def get_hybrid_analysis(q, curr, ma20, rsi, macd):
     prompt = f"종목:{q},가:{curr},20선:{ma20},RSI:{rsi},MACD:{macd}. JSON: decision(매수/매도/관망), short_term, mid_term, bull, bear. 한국어 답변."
+    error_logs = []
     
     # [Groq 시도]
     groq_key = st.secrets.get("GROQ_API_KEY")
@@ -81,18 +82,19 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
             groq_client = Groq(api_key=groq_key)
             completion = groq_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-specdec",
+                model="llama-3.3-70b-versatile",
                 response_format={"type": "json_object"}
             )
             return json.loads(completion.choices[0].message.content)
-        except: pass
+        except Exception as e:
+            error_logs.append(f"Groq 파업 이유: {str(e)}")
 
-    # [Gemini 시도 - 최신 구글 genai 클라이언트 방식]
+    # [Gemini 시도]
     gemini_keys = [st.secrets.get("GEMINI_API_KEY_1"), st.secrets.get("GEMINI_API_KEY_2")]
     for k in [gk for gk in gemini_keys if gk]:
         try:
             client = genai.Client(api_key=k)
-            for m_name in ['gemini-2.0-flash', 'gemini-1.5-flash']:
+            for m_name in ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']:
                 try:
                     res = client.models.generate_content(
                         model=m_name,
@@ -100,9 +102,13 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
                     )
                     jt = re.sub(r'```[a-zA-Z]*\n|```', '', res.text).strip()
                     return json.loads(jt[jt.find('{'):jt.rfind('}')+1])
-                except: continue
-        except: continue
-    return None
+                except Exception as e:
+                    error_logs.append(f"Gemini({m_name}) 파업 이유: {str(e)}")
+        except Exception as e:
+            error_logs.append(f"Gemini 접속 불가: {str(e)}")
+            
+    # 🚨 둘 다 실패하면 에러 기록장 반환!
+    return {"error_logs": error_logs}
 
 # 📊 3. 메인 로직 실행
 with st.spinner(f"'{symbol}' AI 리포트 생성 중..."):
@@ -124,7 +130,14 @@ with st.spinner(f"'{symbol}' AI 리포트 생성 중..."):
         
         # AI 호출
         ai_res = get_hybrid_analysis(search_query, curr_price, float(last['MA20']), float(last['RSI']), float(last['MACD']))
-        if not ai_res:
+        
+        # 🚨 에러가 발생해서 기록장이 날아왔다면 화면에 출력!
+        if ai_res and "error_logs" in ai_res:
+            st.error("🚨 AI 파업 원인 분석 결과:")
+            for err in ai_res["error_logs"]:
+                st.write(f"- {err}")
+            ai_res = {"decision":"확인불가", "short_term":"원인 파악 중", "mid_term":"위의 빨간 에러 메시지를 확인하세요!", "bull":"-", "bear":"-"}
+        elif not ai_res:
             ai_res = {"decision":"확인불가", "short_term":"API 점검 중", "mid_term":"잠시 후 다시 시도해 주세요", "bull":"-", "bear":"-"}
 
         # 🖥️ 4. UI 렌더링
@@ -185,7 +198,7 @@ with st.spinner(f"'{symbol}' AI 리포트 생성 중..."):
             </div>
         """, unsafe_allow_html=True)
         
-        st.caption("Data: Yahoo Finance | AI: Groq & Gemini Hybrid Engine (업데이트 주기: 10분)")
+        st.caption("Data: Yahoo Finance | AI: Groq & Gemini Hybrid Engine")
     else:
         st.error("❌ 야후 파이낸스 서버가 일시적으로 응답하지 않습니다.")
         st.warning("야후의 접속 제한(Too Many Requests)이 걸린 상태일 수 있습니다. 10분 후에 다시 시도해 주세요.")
