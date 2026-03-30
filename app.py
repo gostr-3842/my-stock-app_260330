@@ -120,7 +120,7 @@ else:
     sign = "+" if change_val > 0 else ""
 
     # ==========================================
-    # 🤖 AI 분석 요청 (JSON 포맷 강제)
+    # 🤖 AI 분석 요청 (JSON 포맷 강제 + 모델 자동 탐색)
     # ==========================================
     prompt = f"""
     너는 최고 수준의 애널리스트야. '{search_query}' 종목 데이터를 분석해.
@@ -139,9 +139,16 @@ else:
     ai_data = {"decision": "분석중", "short_term": "-", "mid_term": "-", "bull": "-", "bear": "-"}
     
     try:
-        # 💡 가장 안정적인 1.5 버전 모델로 강제 고정
-        # model_stable = genai.GenerativeModel('gemini-1.5-flash')
-        model_stable = genai.GenerativeModel('gemini-pro')
+        # 💡 치트키: 구글 서버에 접속해서 '현재 내 API 키로 쓸 수 있는' 모델 목록을 자동 검색!
+        valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        if not valid_models:
+            raise ValueError("사용 가능한 제미나이 모델이 없습니다. API 키 상태를 확인해주세요.")
+            
+        # 검색된 모델 중 가장 첫 번째 모델을 자동으로 선택해서 쓴다!
+        auto_model_name = valid_models[0]
+        model_stable = genai.GenerativeModel(auto_model_name)
+        
         res = model_stable.generate_content(prompt)
         
         # 💡 AI가 앞뒤로 헛소리를 섞어놔도, '{' 부터 '}' 까지만 정확히 파내는 수술 작업
@@ -158,8 +165,8 @@ else:
     except Exception as e:
         # 에러가 나면 숨기지 않고 화면에 띄워서 우리가 볼 수 있게 만듦
         st.error(f"⚠️ AI 분석 에러 원인: {e}")
-        if 'res' in locals():
-            st.warning(f"AI가 보낸 원본 메시지: {res.text}")
+        if 'valid_models' in locals():
+            st.info(f"💡 현재 사용 가능한 모델 목록: {valid_models}")
 
     # 뱃지 색상 설정
     badge_cls = "badge-buy" if ai_data['decision'] == "매수" else ("badge-sell" if ai_data['decision'] == "매도" else "badge-hold")
