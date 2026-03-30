@@ -43,13 +43,34 @@ col_search, col_btn = st.columns([4, 1])
 with col_search:
     search_query = st.text_input("종목명/티커 검색", "TIGER 반도체TOP10", label_visibility="collapsed")
 with col_btn:
+    # 💡 갱신 버튼을 누르면 캐시를 무시하고 새로고침하는 기능은 빼고, 자연스럽게 10분 주기로 돌아가게 함
     st.button("🔄 갱신")
 
 clean_query = search_query.replace(" ", "").upper()
 clean_map = {key.replace(" ", "").upper(): value for key, value in SYMBOL_MAP.items()}
 symbol = clean_map.get(clean_query, search_query)
 
-# 🧠 3. 하이브리드 AI 분석 엔진 (Groq + Gemini)
+# 🛡️ [캐싱 적용] 1. 야후 파이낸스 데이터 10분 동안 저장 (야후 차단 완벽 방어)
+@st.cache_data(ttl=600)
+def load_stock_data(sym):
+    df = None
+    for i in range(3):
+        try:
+            df = yf.download(sym, period="1y", interval="1d", progress=False, timeout=10)
+            if df is not None and not df.empty:
+                break
+        except Exception:
+            time.sleep(1)
+    
+    if df is not None and not df.empty:
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+        df = df.dropna(subset=['Close'])
+        return df
+    return None
+
+# 🛡️ [캐싱 적용] 2. 하이브리드 AI 분석 10분 동안 저장 (API 한도 방어)
 @st.cache_data(ttl=600)
 def get_hybrid_analysis(q, curr, ma20, rsi, macd):
     prompt = f"종목:{q},가:{curr},20선:{ma20},RSI:{rsi},MACD:{macd}. JSON: decision(매수/매도/관망), short_term, mid_term, bull, bear. 한국어 답변."
@@ -82,28 +103,11 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
         except: continue
     return None
 
-# 📊 4. 데이터 로드 (강력한 재시도 및 우회 로직)
-with st.spinner(f"'{symbol}' 데이터를 안전하게 가져오는 중..."):
-    df = None
-    # 야후 파이낸스 차단 대비 3회 재시도
-    for i in range(3):
-        try:
-            # interval과 period를 명시하여 요청을 가볍게 함
-            df = yf.download(symbol, period="1y", interval="1d", progress=False, timeout=15)
-            if df is not None and not df.empty:
-                break
-        except Exception as e:
-            time.sleep(2) # 차단 시 2초 대기 후 재시도
+# 📊 3. 메인 로직 실행
+with st.spinner(f"'{symbol}' AI 리포트 생성 중..."):
+    df = load_stock_data(symbol)
             
-    if df is not None and not df.empty:
-        # 야후 최신 버전 멀티인덱스 보정
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-            
-        # 데이터 수치화 및 정제
-        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
-        df = df.dropna(subset=['Close'])
-        
+    if df is not None:
         # 지표 계산
         df['MA20'] = df['Close'].rolling(20).mean()
         delta = df['Close'].diff()
@@ -118,70 +122,4 @@ with st.spinner(f"'{symbol}' 데이터를 안전하게 가져오는 중..."):
         change_pct = ((curr_price - prev_price) / prev_price) * 100
         
         # AI 호출
-        ai_res = get_hybrid_analysis(search_query, curr_price, float(last['MA20']), float(last['RSI']), float(last['MACD']))
-        if not ai_res:
-            ai_res = {"decision":"확인불가", "short_term":"API 한도 초과", "mid_term":"잠시 후 다시 🔄 갱신해 보세요", "bull":"-", "bear":"-"}
-
-        # 🖥️ 5. UI 렌더링
-        badge_cls = "badge-buy" if ai_res['decision'] == "매수" else ("badge-sell" if ai_res['decision'] == "매도" else "badge-hold")
-        st.markdown(f'<span class="badge {badge_cls}">{ai_res["decision"]}</span><h2 style="margin:0;">{search_query}</h2>', unsafe_allow_html=True)
-        st.markdown(f'<div class="title-sub">{symbol} | {datetime.now().strftime("%Y.%m.%d")}</div>', unsafe_allow_html=True)
-
-        st.markdown(f"""
-            <div class="grid-2">
-                <div class="card">
-                    <div class="title-sub">정규장 종가</div>
-                    <div class="val-main">₩{curr_price:,.0f}</div>
-                    <div class="val-sub {"red-txt" if change_pct < 0 else "green-txt"}">{change_pct:+.2f}%</div>
-                </div>
-                <div class="card">
-                    <div class="title-sub">52주 최고점</div>
-                    <div class="val-main">₩{float(df["High"].max()):,.0f}</div>
-                    <div class="val-sub red-txt">전고점대비 {((curr_price-float(df["High"].max()))/float(df["High"].max()))*100:.1f}%</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-            <div class="grid-2">
-                <div class="card">
-                    <div class="title-sub">이동평균 (20일)</div>
-                    <div class="val-main">{"상승" if curr_price > last['MA20'] else "하락"}</div>
-                    <div class="title-sub">기준가: ₩{last['MA20']:,.0f}</div>
-                </div>
-                <div class="card">
-                    <div class="title-sub">RSI (14) / 강도</div>
-                    <div class="val-main">RSI {last['RSI']:.0f}</div>
-                    <div class="title-sub">{"과매도(매수기회)" if last['RSI'] < 40 else "중립"}</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
-        st.markdown(f"""
-            <div class="grid-3">
-                <div class="box-sup"><div class="title-sub">지지</div><div class="val-main">₩{(2*piv-last['High']):,.0f}</div></div>
-                <div class="box-piv"><div class="title-sub">피벗</div><div class="val-main">₩{piv:,.0f}</div></div>
-                <div class="box-res"><div class="title-sub">저항</div><div class="val-main">₩{(2*piv-last['Low']):,.0f}</div></div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown(f"""
-            <div class="card">
-                <div class="title-sub">AI 애널리스트 리포트</div>
-                <div style="font-size:0.95rem; line-height:1.6;">
-                    <b>단기 전망:</b> {ai_res['short_term']}<br>
-                    <b>중기 전망:</b> {ai_res['mid_term']}
-                </div>
-            </div>
-            <div class="grid-2">
-                <div class="box-sup" style="text-align:left;"><b class="green-txt">🟢 강세 요인</b><br><span style="font-size:0.85rem;">{ai_res['bull']}</span></div>
-                <div class="box-res" style="text-align:left;"><b class="red-txt">🔴 약세 요인</b><br><span style="font-size:0.85rem;">{ai_res['bear']}</span></div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.caption("Data: Yahoo Finance | AI: Groq & Gemini Hybrid Engine")
-    else:
-        st.error("❌ 야후 파이낸스 서버가 일시적으로 응답하지 않습니다.")
-        st.warning("야후의 'Too Many Requests' 차단이 걸린 상태입니다. 약 5~10분 후 다시 접속해 주세요.")
-        st.info("💡 해결 방법: 스트림릿 관리자 페이지에서 'Reboot app'을 실행하거나, 잠시 기다리면 IP 차단이 자동으로 풀립니다.")
+        ai_res = get_hybrid_analysis(search
