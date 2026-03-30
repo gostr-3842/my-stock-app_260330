@@ -31,7 +31,19 @@ SYMBOL_MAP = {
 
 # --- 상단 검색 및 타이틀 ---
 st.markdown("<h2 style='text-align: center;'>📊 AI 실시간 애널리스트 리포트</h2>", unsafe_allow_html=True)
-search_query = st.text_input("종목명/티커 검색", "ALAB")
+# --- 기존 코드 ---
+# search_query = st.text_input("종목명/티커 검색", "ALAB")
+# symbol = SYMBOL_MAP.get(search_query.upper(), search_query)
+
+# --- ✨ 수정할 코드 (검색 버튼 추가) ---
+col_search, col_btn = st.columns([4, 1]) # 입력창과 버튼 비율을 4:1로!
+with col_search:
+    search_query = st.text_input("종목명/티커 검색 (예: 삼성전자, NVDA)", "ALAB")
+with col_btn:
+    st.write("") # 간격 맞추기용 빈칸
+    st.write("")
+    st.button("🔄 갱신") # 이 버튼을 누르면 글자가 안 바뀌어도 무조건 최신화됨!
+
 symbol = SYMBOL_MAP.get(search_query.upper(), search_query)
 
 # --- 데이터 로드 및 지표 계산 ---
