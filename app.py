@@ -122,4 +122,69 @@ with st.spinner(f"'{symbol}' AI 리포트 생성 중..."):
         change_pct = ((curr_price - prev_price) / prev_price) * 100
         
         # AI 호출
-        ai_res = get_hybrid_analysis(search
+        ai_res = get_hybrid_analysis(search_query, curr_price, float(last['MA20']), float(last['RSI']), float(last['MACD']))
+        if not ai_res:
+            ai_res = {"decision":"확인불가", "short_term":"API 점검 중", "mid_term":"잠시 후 다시 시도해 주세요", "bull":"-", "bear":"-"}
+
+        # 🖥️ 4. UI 렌더링
+        badge_cls = "badge-buy" if ai_res['decision'] == "매수" else ("badge-sell" if ai_res['decision'] == "매도" else "badge-hold")
+        st.markdown(f'<span class="badge {badge_cls}">{ai_res["decision"]}</span><h2 style="margin:0;">{search_query}</h2>', unsafe_allow_html=True)
+        st.markdown(f'<div class="title-sub">{symbol} | {datetime.now().strftime("%Y.%m.%d")}</div>', unsafe_allow_html=True)
+
+        st.markdown(f"""
+            <div class="grid-2">
+                <div class="card">
+                    <div class="title-sub">정규장 종가</div>
+                    <div class="val-main">₩{curr_price:,.0f}</div>
+                    <div class="val-sub {"red-txt" if change_pct < 0 else "green-txt"}">{change_pct:+.2f}%</div>
+                </div>
+                <div class="card">
+                    <div class="title-sub">52주 최고점</div>
+                    <div class="val-main">₩{float(df["High"].max()):,.0f}</div>
+                    <div class="val-sub red-txt">전고점대비 {((curr_price-float(df["High"].max()))/float(df["High"].max()))*100:.1f}%</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+            <div class="grid-2">
+                <div class="card">
+                    <div class="title-sub">이동평균 (20일)</div>
+                    <div class="val-main">{"상승" if curr_price > last['MA20'] else "하락"}</div>
+                    <div class="title-sub">기준가: ₩{last['MA20']:,.0f}</div>
+                </div>
+                <div class="card">
+                    <div class="title-sub">RSI (14) / 강도</div>
+                    <div class="val-main">RSI {last['RSI']:.0f}</div>
+                    <div class="title-sub">{"과매도(매수기회)" if last['RSI'] < 40 else ("과매수(주의)" if last['RSI'] > 70 else "중립")}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
+        st.markdown(f"""
+            <div class="grid-3">
+                <div class="box-sup"><div class="title-sub">지지선</div><div class="val-main">₩{(2*piv-last['High']):,.0f}</div></div>
+                <div class="box-piv"><div class="title-sub">피벗(중심)</div><div class="val-main">₩{piv:,.0f}</div></div>
+                <div class="box-res"><div class="title-sub">저항선</div><div class="val-main">₩{(2*piv-last['Low']):,.0f}</div></div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+            <div class="card">
+                <div class="title-sub">AI 애널리스트 리포트</div>
+                <div style="font-size:0.95rem; line-height:1.6;">
+                    <b>단기 전망:</b> {ai_res['short_term']}<br>
+                    <b>중기 전망:</b> {ai_res['mid_term']}
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="box-sup" style="text-align:left;"><b class="green-txt">🟢 강세 요인</b><br><span style="font-size:0.85rem;">{ai_res['bull']}</span></div>
+                <div class="box-res" style="text-align:left;"><b class="red-txt">🔴 약세 요인</b><br><span style="font-size:0.85rem;">{ai_res['bear']}</span></div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.caption("Data: Yahoo Finance | AI: Groq & Gemini Hybrid Engine (업데이트 주기: 10분)")
+    else:
+        st.error("❌ 야후 파이낸스 서버가 일시적으로 응답하지 않습니다.")
+        st.warning("야후의 접속 제한(Too Many Requests)이 걸린 상태일 수 있습니다. 10분 후에 다시 시도해 주세요.")
