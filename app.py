@@ -79,7 +79,7 @@ else:
     # 스트림릿 컬럼으로 박스 느낌 내기
     sc1, sc2, sc3 = st.columns(3)
     sc1.success(f"🔼 1차 저항\n\n**{c}{res1:,.0f}**")
-    sc2.secondary(f"⏺️ 피벗(기준)\n\n**{c}{pivot:,.0f}**")
+    sc2.info(f"⏺️ 피벗(기준)\n\n**{c}{pivot:,.0f}**")
     sc3.error(f"🔽 1차 지지\n\n**{c}{sup1:,.0f}**")
 
     st.divider()
