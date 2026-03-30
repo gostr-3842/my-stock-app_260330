@@ -140,7 +140,8 @@ else:
     
     try:
         # 💡 가장 안정적인 1.5 버전 모델로 강제 고정
-        model_stable = genai.GenerativeModel('gemini-1.5-flash')
+        # model_stable = genai.GenerativeModel('gemini-1.5-flash')
+        model_stable = genai.GenerativeModel('gemini-pro')
         res = model_stable.generate_content(prompt)
         
         # 💡 AI가 앞뒤로 헛소리를 섞어놔도, '{' 부터 '}' 까지만 정확히 파내는 수술 작업
