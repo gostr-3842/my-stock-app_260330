@@ -42,6 +42,7 @@ col_search, col_btn = st.columns([4, 1])
 with col_search:
     search_query = st.text_input("종목명/티커 검색", "TIGER 반도체TOP10", label_visibility="collapsed")
 with col_btn:
+    st.write("") # 간격 맞춤
     st.button("🔄 갱신")
 
 clean_query = search_query.replace(" ", "").upper()
@@ -51,27 +52,22 @@ symbol = clean_map.get(clean_query, search_query)
 # 🧠 3. 하이브리드 AI 분석 엔진 (Groq + Gemini)
 @st.cache_data(ttl=600)
 def get_hybrid_analysis(q, curr, ma20, rsi, macd):
-    prompt = f"""
-    Analyze '{q}' stock with data: Price {curr}, MA20 {ma20}, RSI {rsi}, MACD {macd}.
-    Return JSON ONLY: {{"decision":"매수/매도/관망", "short_term":"1줄", "mid_term":"1줄", "bull":"1줄", "bear":"1줄"}}
-    Answer in Korean.
-    """
+    prompt = f"종목:{q},가:{curr},20선:{ma20},RSI:{rsi},MACD:{macd}. JSON(decision:매수/매도/관망, short_term, mid_term, bull, bear). 한국어 답변."
     
-    # --- [1단계] Groq 시도 ---
+    # 1단계: Groq
     groq_key = st.secrets.get("GROQ_API_KEY")
     if groq_key:
         try:
             client = Groq(api_key=groq_key)
-            chat_completion = client.chat.completions.create(
+            completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model="llama-3.3-70b-specdec",
                 response_format={"type": "json_object"}
             )
-            return json.loads(chat_completion.choices[0].message.content)
-        except:
-            pass # 실패 시 제미나이로 패스
+            return json.loads(completion.choices[0].message.content)
+        except: pass
 
-    # --- [2단계] Gemini 듀얼 키 시도 ---
+    # 2단계: Gemini
     gemini_keys = [st.secrets.get("GEMINI_API_KEY_1"), st.secrets.get("GEMINI_API_KEY_2")]
     for k in [gk for gk in gemini_keys if gk]:
         try:
@@ -86,93 +82,31 @@ def get_hybrid_analysis(q, curr, ma20, rsi, macd):
         except: continue
     return None
 
-# 📊 4. 데이터 로드 및 지표 계산
-with st.spinner("실시간 데이터 분석 중..."):
-    df = yf.download(symbol, period="1y", progress=False)
-    if not df.empty:
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+# 📊 4. 데이터 로드 보강
+with st.spinner(f"'{symbol}' 데이터 분석 중..."):
+    # 최신 데이터를 가져오기 위해 period를 1y로 설정
+    df = yf.download(symbol, period="1y", interval="1d", progress=False)
+    
+    if df is not None and not df.empty:
+        # 멀티인덱스 컬럼 정리 (yfinance 최신버전 대응)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        # 지표 계산
         df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA50'] = df['Close'].rolling(50).mean()
         delta = df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
         df['RSI'] = 100 - (100 / (1 + (gain/loss)))
         df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
-        df['BB_Mid'] = df['Close'].rolling(20).mean()
-        df['BB_Lower'] = df['BB_Mid'] - (df['Close'].rolling(20).std() * 2)
-
+        
         last = df.iloc[-1]
         curr_price = float(last['Close'])
         prev_price = float(df.iloc[-2]['Close'])
         change_pct = ((curr_price - prev_price) / prev_price) * 100
         
-        # AI 호출
         ai_res = get_hybrid_analysis(search_query, curr_price, float(last['MA20']), float(last['RSI']), float(last['MACD']))
         if not ai_res:
-            ai_res = {"decision":"확인불가", "short_term":"모든 API 한도초과", "mid_term":"잠시 후 시도", "bull":"-", "bear":"-"}
+            ai_res = {"decision":"확인불가", "short_term":"API 한도 초과", "mid_term":"잠시 후 시도", "bull":"-", "bear":"-"}
 
-        # 🖥️ 5. UI 렌더링
-        badge_cls = "badge-buy" if ai_res['decision'] == "매수" else ("badge-sell" if ai_res['decision'] == "매도" else "badge-hold")
-        st.markdown(f'<span class="badge {badge_cls}">{ai_res["decision"]}</span><h2 style="margin:0;">{search_query}</h2>', unsafe_allow_html=True)
-        st.markdown(f'<div class="title-sub">{symbol} | {datetime.now().strftime("%Y.%m.%d")}</div>', unsafe_allow_html=True)
-
-        # 가격 카드
-        st.markdown(f"""
-            <div class="grid-2">
-                <div class="card">
-                    <div class="title-sub">정규장 종가</div>
-                    <div class="val-main">₩{curr_price:,.0f}</div>
-                    <div class="val-sub {"red-txt" if change_pct < 0 else "green-txt"}">{change_pct:+.2f}%</div>
-                </div>
-                <div class="card">
-                    <div class="title-sub">52주 고점</div>
-                    <div class="val-main">₩{float(df["High"].max()):,.0f}</div>
-                    <div class="val-sub red-txt">고점대비 {((curr_price-float(df["High"].max()))/float(df["High"].max()))*100:.1f}%</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        # 지표 카드
-        st.markdown(f"""
-            <div class="grid-2">
-                <div class="card">
-                    <div class="title-sub">이동평균 (20일)</div>
-                    <div class="val-main">{"상승" if curr_price > last['MA20'] else "하락"}</div>
-                    <div class="title-sub">₩{last['MA20']:,.0f}</div>
-                </div>
-                <div class="card">
-                    <div class="title-sub">RSI (14) / 상태</div>
-                    <div class="val-main">RSI {last['RSI']:.0f}</div>
-                    <div class="title-sub">{"과매도" if last['RSI'] < 40 else "중립"}</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        # 지지/저항
-        piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
-        st.markdown(f"""
-            <div class="grid-3">
-                <div class="box-sup"><div class="title-sub">지지</div><div class="val-main">₩{(2*piv-last['High']):,.0f}</div></div>
-                <div class="box-piv"><div class="title-sub">피벗</div><div class="val-main">₩{piv:,.0f}</div></div>
-                <div class="box-res"><div class="title-sub">저항</div><div class="val-main">₩{(2*piv-last['Low']):,.0f}</div></div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        # AI 시나리오
-        st.markdown(f"""
-            <div class="card">
-                <div class="title-sub">AI 분석 전망</div>
-                <div style="font-size:0.95rem; line-height:1.6;">
-                    <b>단기:</b> {ai_res['short_term']}<br>
-                    <b>중기:</b> {ai_res['mid_term']}
-                </div>
-            </div>
-            <div class="grid-2">
-                <div class="box-sup" style="text-align:left;"><b class="green-txt">🟢 강세</b><br><span style="font-size:0.85rem;">{ai_res['bull']}</span></div>
-                <div class="box-res" style="text-align:left;"><b class="red-txt">🔴 약세</b><br><span style="font-size:0.85rem;">{ai_res['bear']}</span></div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.caption("Data: Yahoo Finance | AI: Groq & Gemini Hybrid")
-    else:
-        st.error("데이터 로드 실패. 티커를 확인해 주세요.")
+        # 🖥️ 5. UI 렌
