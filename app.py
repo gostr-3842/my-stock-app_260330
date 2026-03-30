@@ -13,6 +13,13 @@ st.set_page_config(page_title="AI 실시간 주식 리포트", page_icon="📈",
 
 st.markdown("""
 <style>
+
+    /* 매수/매도 뱃지 */
+    .badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.9rem; float: right; margin-top: 5px; }
+    .badge-buy { background-color: #10b981; color: #000; }
+    .badge-sell { background-color: #ef4444; color: #fff; }
+    .badge-hold { background-color: #4b5563; color: #fff; }
+    
     /* 전체 배경 및 폰트 */
     .stApp { background-color: #0b0e14; color: #d1d5db; font-family: 'Pretendard', sans-serif; }
     
@@ -178,7 +185,14 @@ with st.spinner("VIP 리포트 데이터 수집 중..."):
         target_pct = ((target_price - curr_price)/curr_price)*100 if target_price else 0
         
         # --- UI 시작 ---
-        st.markdown(f"<h2>{search_query} <span style='font-size:1rem;color:#6b7280;font-weight:normal;'>{symbol}</span></h2>", unsafe_allow_html=True)
+        # [타이틀 및 매수/매도 뱃지]
+        decision = ai_data.get('decision', '관망')
+        badge_cls = "badge-buy" if decision == "매수" else ("badge-sell" if decision == "매도" else "badge-hold")
+        
+        st.markdown(f"""
+            <span class="badge {badge_cls}">{decision}</span>
+            <h2 style="margin:0;">{search_query} <span style='font-size:1rem;color:#6b7280;font-weight:normal;'>{symbol}</span></h2>
+        """, unsafe_allow_html=True)
         
         # [상단 요약]
         c_color = "txt-red" if change_val < 0 else "txt-green"
