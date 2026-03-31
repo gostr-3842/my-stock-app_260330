@@ -6,7 +6,7 @@ import re
 
 @st.cache_data(ttl=600)
 def get_ai_scenarios(q, curr, rsi, supply_text, macro_keyword=""):
-    # 사용자가 시장 상황을 입력했다면 프롬프트에 강력하게 주입합니다.
+    # 💡 사용자가 시장 상황을 입력했다면 AI에게 '절대 규칙'으로 주입합니다.
     macro_context = f"\n[핵심 전제 조건] 현재 거시경제/시장 상황: {macro_keyword}\n(분석 시 이 상황을 최우선으로 반영하여 보수적/공격적 스탠스를 결정할 것.)" if macro_keyword else ""
     
     prompt = f"""당신은 탑티어 증권사 수석 애널리스트입니다.
@@ -14,7 +14,7 @@ def get_ai_scenarios(q, curr, rsi, supply_text, macro_keyword=""):
     최신 수급 동향: {supply_text}{macro_context}
     
     위 데이터를 바탕으로 반드시 JSON 포맷으로 아래 5개 항목을 작성하세요.
-    - decision: '매수', '매도', '관망' 중 1개 (수급과 거시경제가 안 좋으면 RSI가 낮아도 관망/매도로 판정)
+    - decision: '매수', '매도', '관망' 중 1개 (수급과 거시경제가 안 좋으면 지표가 좋아도 매도/관망 판정)
     - short_term: 수급과 거시경제를 반영한 단기 예측 (2~3문장)
     - mid_term: 중기 펀더멘탈 및 시황 (2~3문장)
     - bull: 상승 모멘텀 (긍정 요소)
