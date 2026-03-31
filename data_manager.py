@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 import time
 import json
+from datetime import datetime, timezone, timedelta
 
 APP_KEY = st.secrets.get("KIS_APP_KEY")
 APP_SECRET = st.secrets.get("KIS_APP_SECRET")
@@ -47,10 +48,7 @@ def get_investor_data(symbol):
         data = json_data['output']
         df = pd.DataFrame(data)
         
-        # 💡 [수정됨] 한투 API 실제 응답 키값으로 완벽하게 맞춤 (stck_clpr, prsn_ntby_qty)
         cols = ['stck_bsop_date', 'prdy_vrss', 'stck_clpr', 'frgn_ntby_qty', 'orgn_ntby_qty', 'prsn_ntby_qty', 'acml_vol']
-        
-        # 존재하는 컬럼만 안전하게 숫자로 변환 (에러 원천 차단)
         for col in cols: 
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -65,10 +63,9 @@ def analyze_investor_flow(df, is_mirrored=False, leader_name=""):
     
     today = df.iloc[0]
     
-    # 💡 [방어] 키값이 없어도 뻗지 않고 0으로 처리하게끔 안전장치 추가
     f_qty = today.get('frgn_ntby_qty', 0)
     o_qty = today.get('orgn_ntby_qty', 0)
-    a_qty = today.get('prsn_ntby_qty', 0)  # 개인(prsn)
+    a_qty = today.get('prsn_ntby_qty', 0)
     vol = today.get('acml_vol', 0)
     
     f_ratio = (f_qty / vol) * 100 if vol > 0 else 0
@@ -95,6 +92,12 @@ def load_stock_data(sym):
                 df['RSI'] = 100 - (100 / (1 + (gain/loss)))
                 df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
                 df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-                return df
+                
+                # 💡 데이터를 성공적으로 가져온 시점(한국 시간) 기록
+                kst = timezone(timedelta(hours=9))
+                fetch_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M")
+                
+                # 데이터와 시간표를 같이 반환합니다.
+                return df, fetch_time
         except: time.sleep(1)
-    return None
+    return None, None
