@@ -80,7 +80,7 @@ if query:
 
 # [3단계] 모바일에 최적화된 검색 버튼 
 if st.button("검색", use_container_width=True):
-    if query: # 종목을 입력했을 때만 실행되도록 허가
+    if query: 
         st.session_state['analyze_mode'] = True
         st.session_state['symbol'] = symbol
         st.session_state['search_query'] = search_query
@@ -89,20 +89,23 @@ if st.button("검색", use_container_width=True):
         st.warning("종목을 먼저 입력해 주세요!")
         st.session_state['analyze_mode'] = False
 
-# 선택한 짧고 명확한 안내 문구
-st.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
+# 시간 표시를 위한 빈 공간 마련
+info_placeholder = st.empty()
 
-
-# 📊 3. 대시보드 렌더링부 (버튼을 누른 후, 즉 analyze_mode가 True일 때만 아래가 보임)
+# 📊 3. 대시보드 렌더링부
 if st.session_state.get('analyze_mode', False):
-    # 세션에 저장된 값을 꺼내서 씁니다.
     current_symbol = st.session_state['symbol']
     current_search_query = st.session_state['search_query']
     current_macro = st.session_state['macro_keyword']
 
     with st.spinner(f"실시간 데이터 분석 중..."):
-        df = load_stock_data(current_symbol)
+        # 💡 언팩킹: 데이터프레임과 시간표를 함께 받습니다.
+        df, fetch_time = load_stock_data(current_symbol)
+        
         if df is not None:
+            # 데이터가 성공적으로 로드되면 업데이트 시간과 함께 문구를 띄웁니다.
+            info_placeholder.markdown(f"<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다. <span style='opacity:0.7;'>(마지막 업데이트: {fetch_time})</span></div>", unsafe_allow_html=True)
+            
             investor_df = get_investor_data(current_symbol)
             is_mirrored = False
             
@@ -117,7 +120,7 @@ if st.session_state.get('analyze_mode', False):
             high_52 = float(df['High'].max())
             rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
             
-            # 🔥 AI에게 매크로 키워드를 함께 던져줍니다.
+            # AI 엔진 호출
             ai_data = get_ai_scenarios(current_search_query, curr_price, rsi_val, supply_text, current_macro)
             
             decision = ai_data.get('decision', '관망')
@@ -216,6 +219,8 @@ if st.session_state.get('analyze_mode', False):
             """, unsafe_allow_html=True)
         else:
             st.error("데이터 로드 실패")
+            info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
 else:
     # 앱을 처음 켰을 때 나오는 기본 안내 화면
+    info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
     st.info("💡 위에서 매크로 환경과 종목을 설정한 뒤 '검색' 버튼을 눌러주세요.")
