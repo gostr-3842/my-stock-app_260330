@@ -47,14 +47,30 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 🔍 2. 스마트 검색창 로직
+# 🔍 2. 탑다운(Top-Down) 스마트 검색창 로직
 df_tickers = load_tickers()
 
+# [1단계] 글로벌 매크로 상황 선택 (화면 맨 위, 모든 종목에 공통 적용되는 세계관)
+macro_options = [
+    "특이사항 없음 (기본 차트 및 수급 중심 분석)",
+    "전쟁 장기화 및 환율 급등 (위험자산 회피, 극도로 보수적 접근)",
+    "글로벌 금리 인하 기대감 (위험자산 선호, 긍정적 시각)",
+    "경기 침체(Recession) 우려 (실적 악화 및 방어적 접근)",
+    "인플레이션 고착화 및 고금리 장기화 (기술주 부담)"
+]
+macro_selected = st.selectbox("🌍 시장 전체 매크로 상황 (AI 분석 전제조건)", macro_options)
+
+# '특이사항 없음'을 선택하면 AI에게 빈 값을 넘겨 기본 분석을 하게 함
+macro_keyword = "" if "특이사항 없음" in macro_selected else macro_selected
+
+st.write("") # 약간의 여백 추가
+
+# [2단계] 개별 종목 검색 (매크로 환경 아래에 배치)
 col_search, col_btn = st.columns([4, 1])
 with col_search:
-    query = st.text_input("종목 검색", "", placeholder="예: 삼성전자, NVDA", label_visibility="collapsed")
+    query = st.text_input("종목 검색", "", placeholder="예: 삼성전자, 하이닉스", label_visibility="collapsed")
 with col_btn:
-    st.button("🔄 갱신")
+    st.button("🔄 분석 갱신")
 
 if query:
     clean_query = query.replace(" ", "").upper()
