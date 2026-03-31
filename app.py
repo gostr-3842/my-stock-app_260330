@@ -89,7 +89,7 @@ if st.button("검색", use_container_width=True):
         st.warning("종목을 먼저 입력해 주세요!")
         st.session_state['analyze_mode'] = False
 
-# 시간 표시를 위한 빈 공간 마련
+# 💡 [핵심] 안내 문구가 들어갈 단 하나의 공간
 info_placeholder = st.empty()
 
 # 📊 3. 대시보드 렌더링부
@@ -99,30 +99,25 @@ if st.session_state.get('analyze_mode', False):
     current_macro = st.session_state['macro_keyword']
 
     with st.spinner(f"실시간 데이터 분석 중..."):
-        # 💡 언팩킹: 데이터프레임과 시간표를 함께 받습니다.
         df, fetch_time = load_stock_data(current_symbol)
         
         if df is not None:
-            # 데이터가 성공적으로 로드되면 업데이트 시간과 함께 문구를 띄웁니다.
+            # ✅ 검색 후: 시간이 포함된 문구로 업데이트
             info_placeholder.markdown(f"<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다. <span style='opacity:0.7;'>(마지막 업데이트: {fetch_time})</span></div>", unsafe_allow_html=True)
             
             investor_df = get_investor_data(current_symbol)
             is_mirrored = False
-            
             if investor_df is None or (not investor_df.empty and investor_df.iloc[0]['frgn_ntby_qty'] == 0):
                 investor_df = get_investor_data("005930.KS")
                 is_mirrored = True
             
             supply_text = analyze_investor_flow(investor_df, is_mirrored, "삼성전자")
-
             last = df.iloc[-1]
             curr_price = float(last['Close'])
             high_52 = float(df['High'].max())
             rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
             
-            # AI 엔진 호출
             ai_data = get_ai_scenarios(current_search_query, curr_price, rsi_val, supply_text, current_macro)
-            
             decision = ai_data.get('decision', '관망')
             badge_cls = "badge-buy" if decision == "매수" else ("badge-sell" if decision == "매도" else "badge-hold")
 
@@ -219,8 +214,7 @@ if st.session_state.get('analyze_mode', False):
             """, unsafe_allow_html=True)
         else:
             st.error("데이터 로드 실패")
-            info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
 else:
-    # 앱을 처음 켰을 때 나오는 기본 안내 화면
+    # ✅ 검색 전: 기본 안내 문구만 노출
     info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
     st.info("💡 위에서 매크로 환경과 종목을 설정한 뒤 '검색' 버튼을 눌러주세요.")
