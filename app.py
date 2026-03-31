@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 
-# 우리가 만든 모듈 3대장 불러오기
 from utils import format_price, load_tickers
 from data_manager import load_stock_data, get_investor_data, analyze_investor_flow
 from ai_engine import get_ai_scenarios
 
-# 📱 1. VIP 스타일 UI 설정 (전체 테마 유지)
+# 📱 1. VIP 스타일 UI 설정
 st.set_page_config(page_title="AI 실시간 주식 리포트", page_icon="📈", layout="centered")
 
 st.markdown("""
@@ -47,10 +46,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 🔍 2. 탑다운(Top-Down) 스마트 검색창 로직
+# 🔍 2. 탑다운(Top-Down) 입력부
 df_tickers = load_tickers()
 
-# [1단계] 글로벌 매크로 상황 선택 (화면 맨 위, 모든 종목에 공통 적용되는 세계관)
+# [1단계] 매크로 환경 세팅
 macro_options = [
     "특이사항 없음 (기본 차트 및 수급 중심 분석)",
     "전쟁 장기화 및 환율 급등 (위험자산 회피, 극도로 보수적 접근)",
@@ -58,19 +57,13 @@ macro_options = [
     "경기 침체(Recession) 우려 (실적 악화 및 방어적 접근)",
     "인플레이션 고착화 및 고금리 장기화 (기술주 부담)"
 ]
-macro_selected = st.selectbox("🌍 시장 전체 매크로 상황 (AI 분석 전제조건)", macro_options)
-
-# '특이사항 없음'을 선택하면 AI에게 빈 값을 넘겨 기본 분석을 하게 함
+macro_selected = st.selectbox("🌍 시장 전체 매크로 상황", macro_options)
 macro_keyword = "" if "특이사항 없음" in macro_selected else macro_selected
 
-st.write("") # 약간의 여백 추가
-
-# [2단계] 개별 종목 검색 (매크로 환경 아래에 배치)
-col_search, col_btn = st.columns([4, 1])
-with col_search:
-    query = st.text_input("종목 검색", "", placeholder="예: 삼성전자, 하이닉스", label_visibility="collapsed")
-with col_btn:
-    st.button("🔄 분석 갱신")
+# [2단계] 종목 입력 및 선택
+query = st.text_input("🔍 종목 검색", "", placeholder="예: 삼성전자, 하이닉스")
+symbol = ""
+search_query = ""
 
 if query:
     clean_query = query.replace(" ", "").upper()
@@ -84,130 +77,145 @@ if query:
     else:
         symbol = query.upper()
         search_query = query.upper()
-else:
-    symbol = "005930.KS"
-    search_query = "삼성전자"
 
-# 📊 3. 데이터 로드 및 렌더링
-with st.spinner(f"실시간 데이터 분석 중..."):
-    df = load_stock_data(symbol)
-    if df is not None:
-        # --- 수급 데이터 및 미러링 로직 시작 ---
-        investor_df = get_investor_data(symbol)
-        is_mirrored = False
-        
-        # 데이터가 비어있거나(None) 첫 행의 외인 수급이 0일 때 삼성전자(005930)로 미러링
-        if investor_df is None or (not investor_df.empty and investor_df.iloc[0]['frgn_ntby_qty'] == 0):
-            investor_df = get_investor_data("005930.KS")
-            is_mirrored = True
-        
-        # 수급 분석 문장 생성
-        supply_text = analyze_investor_flow(investor_df, is_mirrored, "삼성전자")
-        # --- 수급 데이터 로직 끝 ---
-
-        last = df.iloc[-1]
-        curr_price = float(last['Close'])
-        high_52 = float(df['High'].max())
-        rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
-        
-        ai_data = get_ai_scenarios(search_query, curr_price, rsi_val, supply_text)
-        
-        decision = ai_data.get('decision', '관망')
-        badge_cls = "badge-buy" if decision == "매수" else ("badge-sell" if decision == "매도" else "badge-hold")
-
-        st.markdown(f'<span class="badge {badge_cls}">{decision}</span><h2 style="margin:0;">{search_query} <br><span style="font-size:1rem;color:#6b7280;font-weight:normal;">{symbol}</span></h2>', unsafe_allow_html=True)
-        
-        change_pct = ((curr_price - float(df.iloc[-2]['Close'])) / float(df.iloc[-2]['Close'])) * 100
-        
-        st.markdown(f"""
-        <div class="grid-2" style="margin-top:25px;">
-            <div class="vip-card">
-                <div class="card-title">현재가</div>
-                <div class="top-price-val">{format_price(curr_price, symbol)}</div>
-                <div class="{"txt-red" if change_pct < 0 else "txt-green"}">{change_pct:+.2f}%</div>
-            </div>
-            <div class="vip-card">
-                <div class="card-title">52주 고점 대비</div>
-                <div class="top-price-val" style="font-size:1.4rem;">{format_price(high_52, symbol)}</div>
-                <div class="txt-red">{((curr_price-high_52)/high_52)*100:.1f}% 하락</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div class='section-title'>추세 및 지표 분석</div>", unsafe_allow_html=True)
-        ma_status = "상승 추세" if curr_price > last['MA20'] else "하락 추세"
-        
-        st.markdown(f"""
-        <div class="grid-2">
-            <div class="vip-card">
-                <span class="dot {"dot-green" if "상승" in ma_status else "dot-red"}"></span>
-                <div class="card-title">이동평균 (20일)</div>
-                <div class="card-value">{ma_status}</div>
-                <div class="card-desc">현재가가 20일선 {"위" if "상승" in ma_status else "아래"}에 머물고 있습니다.</div>
-            </div>
-            <div class="vip-card">
-                <span class="dot {"dot-green" if rsi_val < 30 else ("dot-red" if rsi_val > 70 else "dot-yellow")}"></span>
-                <div class="card-title">RSI (14)</div>
-                <div class="card-value">RSI {rsi_val:.0f}</div>
-                <div class="card-desc">{"과매도" if rsi_val < 30 else ("과매수" if rsi_val > 70 else "중립")} 구간에 진입해 있습니다.</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div class='section-title'>주요 지지 / 저항 레벨</div>", unsafe_allow_html=True)
-        piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
-        s1 = 2 * piv - float(last['High'])
-        s2 = piv - (float(last['High']) - float(last['Low']))
-        r1 = 2 * piv - float(last['Low'])
-        r2 = piv + (float(last['High']) - float(last['Low']))
-        
-        st.markdown(f"""
-        <div class="grid-3">
-            <div class="pivot-box bg-sup"><div class="pv-title">지지 2</div><div class="pv-val">{format_price(s2, symbol)}</div></div>
-            <div class="pivot-box bg-sup"><div class="pv-title">지지 1</div><div class="pv-val">{format_price(s1, symbol)}</div></div>
-            <div class="pivot-box bg-piv"><div class="pv-title">피벗 (중심)</div><div class="pv-val">{format_price(piv, symbol)}</div></div>
-        </div>
-        <div class="grid-3">
-            <div class="pivot-box bg-res"><div class="pv-title">저항 1</div><div class="pv-val">{format_price(r1, symbol)}</div></div>
-            <div class="pivot-box bg-res"><div class="pv-title">저항 2</div><div class="pv-val">{format_price(r2, symbol)}</div></div>
-            <div class="pivot-box bg-ath"><div class="pv-title">52주 고점</div><div class="pv-val">{format_price(high_52, symbol)}</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div class='section-title'>AI 투자 전략 리포트</div>", unsafe_allow_html=True)
-        st.markdown(f"""
-        <div class="vip-card">
-            <div class="ai-row"><div class="ai-label">단기 전망</div><div class="ai-text">{ai_data.get('short_term')}</div></div>
-            <div style="height:1px; background:#1f2937; margin:10px 0;"></div>
-            <div class="ai-row"><div class="ai-label">중기 전망</div><div class="ai-text">{ai_data.get('mid_term')}</div></div>
-        </div>
-        <div class="grid-2" style="margin-top:10px;">
-            <div class="scenario-box box-bull"><div class="txt-green" style="font-weight:bold; margin-bottom:5px;">🟢 강세 근거</div><div class="ai-text" style="font-size:0.85rem;">{ai_data.get('bull')}</div></div>
-            <div class="scenario-box box-bear"><div class="txt-red" style="font-weight:bold; margin-bottom:5px;">🔴 약세 근거</div><div class="ai-text" style="font-size:0.85rem;">{ai_data.get('bear')}</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # 🚨 [중요] 외국인 수급 동향 섹션 (방어 로직 포함)
-        st.markdown("<div class='section-title'>외국인 수급 동향 (최근 3일)</div>", unsafe_allow_html=True)
-        inv_rows = ""
-        
-        # investor_df가 None이 아니고 비어있지 않을 때만 데이터 가공
-        if investor_df is not None and not investor_df.empty:
-            for _, row in investor_df.iterrows():
-                date_val = str(row['stck_bsop_date'])
-                date_str = f"{date_val[4:6]}/{date_val[6:8]}"
-                qty = row['frgn_ntby_qty']
-                color = "txt-green" if qty > 0 else "txt-red"
-                inv_rows += f"<div style='display:flex; justify-content:space-between; margin-bottom:5px;'><span>{date_str}</span><span class='{color}'>{qty:+,d} 주</span></div>"
-        else:
-            inv_rows = "<div style='color:#9ca3af; font-size:0.85rem;'>현재 수급 데이터를 불러올 수 없습니다.</div>"
-
-        st.markdown(f"""
-        <div class="vip-card">
-            {inv_rows}
-            <div style="height:1px; background:#1f2937; margin:10px 0;"></div>
-            <div class="ai-text" style="font-size:0.85rem; color:#9ca3af;">{supply_text}</div>
-        </div>
-        """, unsafe_allow_html=True)
+# [3단계] 모바일에 최적화된 검색 버튼 
+if st.button("검색", use_container_width=True):
+    if query: # 종목을 입력했을 때만 실행되도록 허가
+        st.session_state['analyze_mode'] = True
+        st.session_state['symbol'] = symbol
+        st.session_state['search_query'] = search_query
+        st.session_state['macro_keyword'] = macro_keyword
     else:
-        st.error("데이터 로드 실패")
+        st.warning("종목을 먼저 입력해 주세요!")
+        st.session_state['analyze_mode'] = False
+
+# 선택한 짧고 명확한 안내 문구
+st.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
+
+
+# 📊 3. 대시보드 렌더링부 (버튼을 누른 후, 즉 analyze_mode가 True일 때만 아래가 보임)
+if st.session_state.get('analyze_mode', False):
+    # 세션에 저장된 값을 꺼내서 씁니다.
+    current_symbol = st.session_state['symbol']
+    current_search_query = st.session_state['search_query']
+    current_macro = st.session_state['macro_keyword']
+
+    with st.spinner(f"실시간 데이터 분석 중..."):
+        df = load_stock_data(current_symbol)
+        if df is not None:
+            investor_df = get_investor_data(current_symbol)
+            is_mirrored = False
+            
+            if investor_df is None or (not investor_df.empty and investor_df.iloc[0]['frgn_ntby_qty'] == 0):
+                investor_df = get_investor_data("005930.KS")
+                is_mirrored = True
+            
+            supply_text = analyze_investor_flow(investor_df, is_mirrored, "삼성전자")
+
+            last = df.iloc[-1]
+            curr_price = float(last['Close'])
+            high_52 = float(df['High'].max())
+            rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+            
+            # 🔥 AI에게 매크로 키워드를 함께 던져줍니다.
+            ai_data = get_ai_scenarios(current_search_query, curr_price, rsi_val, supply_text, current_macro)
+            
+            decision = ai_data.get('decision', '관망')
+            badge_cls = "badge-buy" if decision == "매수" else ("badge-sell" if decision == "매도" else "badge-hold")
+
+            st.markdown(f'<span class="badge {badge_cls}">{decision}</span><h2 style="margin:0;">{current_search_query} <br><span style="font-size:1rem;color:#6b7280;font-weight:normal;">{current_symbol}</span></h2>', unsafe_allow_html=True)
+            
+            change_pct = ((curr_price - float(df.iloc[-2]['Close'])) / float(df.iloc[-2]['Close'])) * 100
+            
+            st.markdown(f"""
+            <div class="grid-2" style="margin-top:25px;">
+                <div class="vip-card">
+                    <div class="card-title">현재가</div>
+                    <div class="top-price-val">{format_price(curr_price, current_symbol)}</div>
+                    <div class="{"txt-red" if change_pct < 0 else "txt-green"}">{change_pct:+.2f}%</div>
+                </div>
+                <div class="vip-card">
+                    <div class="card-title">52주 고점 대비</div>
+                    <div class="top-price-val" style="font-size:1.4rem;">{format_price(high_52, current_symbol)}</div>
+                    <div class="txt-red">{((curr_price-high_52)/high_52)*100:.1f}% 하락</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>추세 및 지표 분석</div>", unsafe_allow_html=True)
+            ma_status = "상승 추세" if curr_price > last['MA20'] else "하락 추세"
+            
+            st.markdown(f"""
+            <div class="grid-2">
+                <div class="vip-card">
+                    <span class="dot {"dot-green" if "상승" in ma_status else "dot-red"}"></span>
+                    <div class="card-title">이동평균 (20일)</div>
+                    <div class="card-value">{ma_status}</div>
+                    <div class="card-desc">현재가가 20일선 {"위" if "상승" in ma_status else "아래"}에 머물고 있습니다.</div>
+                </div>
+                <div class="vip-card">
+                    <span class="dot {"dot-green" if rsi_val < 30 else ("dot-red" if rsi_val > 70 else "dot-yellow")}"></span>
+                    <div class="card-title">RSI (14)</div>
+                    <div class="card-value">RSI {rsi_val:.0f}</div>
+                    <div class="card-desc">{"과매도" if rsi_val < 30 else ("과매수" if rsi_val > 70 else "중립")} 구간에 진입해 있습니다.</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>주요 지지 / 저항 레벨</div>", unsafe_allow_html=True)
+            piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
+            s1 = 2 * piv - float(last['High'])
+            s2 = piv - (float(last['High']) - float(last['Low']))
+            r1 = 2 * piv - float(last['Low'])
+            r2 = piv + (float(last['High']) - float(last['Low']))
+            
+            st.markdown(f"""
+            <div class="grid-3">
+                <div class="pivot-box bg-sup"><div class="pv-title">지지 2</div><div class="pv-val">{format_price(s2, current_symbol)}</div></div>
+                <div class="pivot-box bg-sup"><div class="pv-title">지지 1</div><div class="pv-val">{format_price(s1, current_symbol)}</div></div>
+                <div class="pivot-box bg-piv"><div class="pv-title">피벗 (중심)</div><div class="pv-val">{format_price(piv, current_symbol)}</div></div>
+            </div>
+            <div class="grid-3">
+                <div class="pivot-box bg-res"><div class="pv-title">저항 1</div><div class="pv-val">{format_price(r1, current_symbol)}</div></div>
+                <div class="pivot-box bg-res"><div class="pv-title">저항 2</div><div class="pv-val">{format_price(r2, current_symbol)}</div></div>
+                <div class="pivot-box bg-ath"><div class="pv-title">52주 고점</div><div class="pv-val">{format_price(high_52, current_symbol)}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>AI 투자 전략 리포트</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="vip-card">
+                <div class="ai-row"><div class="ai-label">단기 전망</div><div class="ai-text">{ai_data.get('short_term')}</div></div>
+                <div style="height:1px; background:#1f2937; margin:10px 0;"></div>
+                <div class="ai-row"><div class="ai-label">중기 전망</div><div class="ai-text">{ai_data.get('mid_term')}</div></div>
+            </div>
+            <div class="grid-2" style="margin-top:10px;">
+                <div class="scenario-box box-bull"><div class="txt-green" style="font-weight:bold; margin-bottom:5px;">🟢 강세 근거</div><div class="ai-text" style="font-size:0.85rem;">{ai_data.get('bull')}</div></div>
+                <div class="scenario-box box-bear"><div class="txt-red" style="font-weight:bold; margin-bottom:5px;">🔴 약세 근거</div><div class="ai-text" style="font-size:0.85rem;">{ai_data.get('bear')}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>외국인 수급 동향 (최근 3일)</div>", unsafe_allow_html=True)
+            inv_rows = ""
+            if investor_df is not None and not investor_df.empty:
+                for _, row in investor_df.iterrows():
+                    date_val = str(row['stck_bsop_date'])
+                    date_str = f"{date_val[4:6]}/{date_val[6:8]}"
+                    qty = row['frgn_ntby_qty']
+                    color = "txt-green" if qty > 0 else "txt-red"
+                    inv_rows += f"<div style='display:flex; justify-content:space-between; margin-bottom:5px;'><span>{date_str}</span><span class='{color}'>{qty:+,d} 주</span></div>"
+            else:
+                inv_rows = "<div style='color:#9ca3af; font-size:0.85rem;'>현재 수급 데이터를 불러올 수 없습니다.</div>"
+
+            st.markdown(f"""
+            <div class="vip-card">
+                {inv_rows}
+                <div style="height:1px; background:#1f2937; margin:10px 0;"></div>
+                <div class="ai-text" style="font-size:0.85rem; color:#9ca3af;">{supply_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.error("데이터 로드 실패")
+else:
+    # 앱을 처음 켰을 때 나오는 기본 안내 화면
+    st.info("💡 위에서 매크로 환경과 종목을 설정한 뒤 '검색' 버튼을 눌러주세요.")
