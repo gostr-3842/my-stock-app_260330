@@ -1,14 +1,12 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-from datetime import datetime
-from google import genai
-from groq import Groq
-import json
-import re
-import time
 
-# 📱 1. VIP 스타일 UI 설정 (누락 없이 전부 포함!)
+# 우리가 만든 모듈 3대장 불러오기
+from utils import format_price, load_tickers
+from data_manager import load_stock_data
+from ai_engine import get_ai_scenarios
+
+# 📱 1. VIP 스타일 UI 설정
 st.set_page_config(page_title="AI 실시간 주식 리포트", page_icon="📈", layout="centered")
 
 st.markdown("""
@@ -50,18 +48,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def format_price(val, sym):
-    if ".KS" in sym or ".KQ" in sym: return f"₩{val:,.0f}"
-    return f"${val:,.2f}"
-
-# 🔍 2. 스마트 검색창 (CSV 기반)
-@st.cache_data
-def load_tickers():
-    try:
-        return pd.read_csv("krx_tickers.csv")
-    except Exception:
-        return pd.DataFrame(columns=["name", "ticker"])
-
+# 🔍 2. 스마트 검색창
 df_tickers = load_tickers()
 
 col_search, col_btn = st.columns([4, 1])
@@ -86,67 +73,7 @@ else:
     symbol = "396500.KS"
     search_query = "TIGER FN반도체TOP10"
 
-# 🤖 3. 상세 AI 리포팅 엔진 (강력한 프롬프트)
-@st.cache_data(ttl=600)
-def get_ai_scenarios(q, curr, rsi):
-    prompt = f"""당신은 탑티어 증권사 수석 애널리스트입니다.
-    종목: {q}, 현재가: {curr}, RSI: {rsi:.1f}
-    반드시 JSON 포맷으로 아래 5개 항목을 작성하세요.
-    - decision: '매수', '매도', '관망' 중 딱 1개 선택
-    - short_term: 단기(1~2주) 가격 흐름과 지지/저항선 예측 (반드시 2~3문장의 구체적 서술)
-    - mid_term: 중기(1~3개월) 펀더멘탈, 시황 전망 (반드시 2~3문장의 구체적 서술)
-    - bull: 상승을 견인할 모멘텀 및 호재 (구체적 이유 2~3문장 서술)
-    - bear: 하락을 유발할 리스크 및 악재 (구체적 이유 2~3문장 서술)
-    모든 답변은 한국어로 전문적인 톤으로 작성하세요."""
-    
-    groq_key = st.secrets.get("GROQ_API_KEY")
-    if groq_key:
-        try:
-            client = Groq(api_key=groq_key)
-            completion = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}], 
-                model="llama-3.3-70b-versatile", 
-                response_format={"type": "json_object"}
-            )
-            return json.loads(completion.choices[0].message.content)
-        except: pass
-
-    gemini_keys = [st.secrets.get("GEMINI_API_KEY_1"), st.secrets.get("GEMINI_API_KEY_2")]
-    for k in [gk for gk in gemini_keys if gk]:
-        try:
-            client = genai.Client(api_key=k)
-            res = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
-            jt = re.sub(r'```[a-zA-Z]*\n|```', '', res.text).strip()
-            return json.loads(jt[jt.find('{'):jt.rfind('}')+1])
-        except: continue
-    return {"decision":"관망", "short_term":"분석 로딩 중...", "mid_term":"잠시 후 다시 시도하세요.", "bull":"-", "bear":"-"}
-
-# 🛡️ 4. 데이터 로드 (모든 지표 계산 복구!)
-@st.cache_data(ttl=600)
-def load_stock_data(sym):
-    for i in range(3):
-        try:
-            tkr = yf.Ticker(sym)
-            df = tkr.history(period="1y", interval="1d")
-            if not df.empty:
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
-                df = df.dropna(subset=['Close'])
-                
-                # 지표 계산 전부 살렸습니다!
-                df['MA20'] = df['Close'].rolling(20).mean()
-                df['MA50'] = df['Close'].rolling(50).mean()
-                delta = df['Close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-                df['RSI'] = 100 - (100 / (1 + (gain/loss)))
-                df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
-                df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-                return df
-        except: time.sleep(1)
-    return None
-
-# 📊 5. 렌더링 (화면 꽉 차게 복구!)
+# 📊 3. 렌더링
 with st.spinner(f"분석 중..."):
     df = load_stock_data(symbol)
     if df is not None:
@@ -167,7 +94,6 @@ with st.spinner(f"분석 중..."):
         
         change_pct = ((curr_price - float(df.iloc[-2]['Close'])) / float(df.iloc[-2]['Close'])) * 100
         
-        # 상단 요약 2칸
         st.markdown(f"""
         <div class="grid-2" style="margin-top:25px;">
             <div class="vip-card">
@@ -183,10 +109,8 @@ with st.spinner(f"분석 중..."):
         </div>
         """, unsafe_allow_html=True)
 
-        # 지표 분석 부분 복구!
         st.markdown("<div class='section-title'>추세 및 지표 분석</div>", unsafe_allow_html=True)
         ma_status = "상승 추세" if curr_price > last['MA20'] else "하락 추세"
-        m_txt = "매수 신호" if macd_val > sig_val else "매도 신호"
         
         st.markdown(f"""
         <div class="grid-2">
@@ -205,7 +129,6 @@ with st.spinner(f"분석 중..."):
         </div>
         """, unsafe_allow_html=True)
 
-        # 주요 지지/저항 복구!
         st.markdown("<div class='section-title'>주요 지지 / 저항 레벨</div>", unsafe_allow_html=True)
         piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
         s1 = 2 * piv - float(last['High'])
@@ -226,7 +149,6 @@ with st.spinner(f"분석 중..."):
         </div>
         """, unsafe_allow_html=True)
 
-        # AI 리포트
         st.markdown("<div class='section-title'>AI 투자 전략 리포트</div>", unsafe_allow_html=True)
         st.markdown(f"""
         <div class="vip-card">
