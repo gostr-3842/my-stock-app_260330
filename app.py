@@ -45,7 +45,16 @@ with st.spinner("분석 중..."):
         # 3. [추가] 맨 하단 외국인 수급 정보 표시
         st.markdown("<div class='section-title'>외국인 수급 동향 (최근 3일)</div>", unsafe_allow_html=True)
         inv_rows = ""
-        for _, row in investor_df.iterrows():
+        
+        # 👇 방어 로직 추가: investor_df가 비어있지 않을 때만 반복문 실행
+        if investor_df is not None and not investor_df.empty:
+            for _, row in investor_df.iterrows():
+                date_str = str(row['stck_bsop_date'])[4:6] + "/" + str(row['stck_bsop_date'])[6:8]
+                qty = row['frgn_ntby_qty']
+                color = "txt-green" if qty > 0 else "txt-red"
+                inv_rows += f"<div style='display:flex; justify-content:space-between; margin-bottom:5px;'><span>{date_str}</span><span class='{color}'>{qty:+,d} 주</span></div>"
+        else:
+            inv_rows = "<div style='color:#ef4444; font-size:0.9rem;'>수급 API 연동 지연 또는 키 설정 오류입니다.</div>"
             date_str = str(row['stck_bsop_date'])[4:6] + "/" + str(row['stck_bsop_date'])[6:8]
             qty = row['frgn_ntby_qty']
             color = "txt-green" if qty > 0 else "txt-red"
