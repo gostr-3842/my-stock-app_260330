@@ -8,7 +8,7 @@ import json
 import re
 import time
 
-# 📱 1. VIP 스타일 UI 설정
+# 📱 1. VIP 스타일 UI 설정 (누락 없이 전부 포함!)
 st.set_page_config(page_title="AI 실시간 주식 리포트", page_icon="📈", layout="centered")
 
 st.markdown("""
@@ -29,6 +29,14 @@ st.markdown("""
     .dot-red { background-color: #ef4444; box-shadow: 0 0 5px #ef4444; }
     .dot-yellow { background-color: #f59e0b; box-shadow: 0 0 5px #f59e0b; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+    .pivot-box { border-radius: 8px; padding: 12px 0; text-align: center; display: flex; flex-direction: column; border: 1px solid #2d3748;}
+    .pv-title { font-size: 0.75rem; margin-bottom: 4px; opacity: 0.8;}
+    .pv-val { font-size: 1.1rem; font-weight: 700; }
+    .bg-sup { background-color: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd; }
+    .bg-piv { background-color: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.4); color: #c4b5fd; }
+    .bg-res { background-color: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+    .bg-ath { background-color: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.4); color: #fcd34d; }
     .ai-row { display: flex; gap: 12px; margin-bottom: 10px; }
     .ai-label { min-width: 80px; font-size: 0.85rem; color: #9ca3af; }
     .ai-text { font-size: 0.9rem; color: #e5e7eb; line-height: 1.6; }
@@ -78,7 +86,7 @@ else:
     symbol = "396500.KS"
     search_query = "TIGER FN반도체TOP10"
 
-# 🤖 3. 상세 AI 리포팅 엔진 (강력한 프롬프트 적용)
+# 🤖 3. 상세 AI 리포팅 엔진 (강력한 프롬프트)
 @st.cache_data(ttl=600)
 def get_ai_scenarios(q, curr, rsi):
     prompt = f"""당신은 탑티어 증권사 수석 애널리스트입니다.
@@ -113,7 +121,7 @@ def get_ai_scenarios(q, curr, rsi):
         except: continue
     return {"decision":"관망", "short_term":"분석 로딩 중...", "mid_term":"잠시 후 다시 시도하세요.", "bull":"-", "bear":"-"}
 
-# 🛡️ 4. 데이터 로드
+# 🛡️ 4. 데이터 로드 (모든 지표 계산 복구!)
 @st.cache_data(ttl=600)
 def load_stock_data(sym):
     for i in range(3):
@@ -124,22 +132,32 @@ def load_stock_data(sym):
                 if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
                 df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
                 df = df.dropna(subset=['Close'])
+                
+                # 지표 계산 전부 살렸습니다!
                 df['MA20'] = df['Close'].rolling(20).mean()
+                df['MA50'] = df['Close'].rolling(50).mean()
                 delta = df['Close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(14).mean()
                 loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
                 df['RSI'] = 100 - (100 / (1 + (gain/loss)))
+                df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
+                df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
                 return df
         except: time.sleep(1)
     return None
 
-# 📊 5. 렌더링
+# 📊 5. 렌더링 (화면 꽉 차게 복구!)
 with st.spinner(f"분석 중..."):
     df = load_stock_data(symbol)
     if df is not None:
         last = df.iloc[-1]
         curr_price = float(last['Close'])
+        high_52 = float(df['High'].max())
+        
         rsi_val = last['RSI'] if not pd.isna(last['RSI']) else 50
+        macd_val = last['MACD'] if not pd.isna(last['MACD']) else 0
+        sig_val = last['MACD_Signal'] if not pd.isna(last['MACD_Signal']) else 0
+        
         ai_data = get_ai_scenarios(search_query, curr_price, rsi_val)
         
         decision = ai_data.get('decision', '관망')
@@ -148,6 +166,8 @@ with st.spinner(f"분석 중..."):
         st.markdown(f'<span class="badge {badge_cls}">{decision}</span><h2 style="margin:0;">{search_query} <br><span style="font-size:1rem;color:#6b7280;font-weight:normal;">{symbol}</span></h2>', unsafe_allow_html=True)
         
         change_pct = ((curr_price - float(df.iloc[-2]['Close'])) / float(df.iloc[-2]['Close'])) * 100
+        
+        # 상단 요약 2칸
         st.markdown(f"""
         <div class="grid-2" style="margin-top:25px;">
             <div class="vip-card">
@@ -156,13 +176,57 @@ with st.spinner(f"분석 중..."):
                 <div class="{"txt-red" if change_pct < 0 else "txt-green"}">{change_pct:+.2f}%</div>
             </div>
             <div class="vip-card">
-                <div class="card-title">RSI (14)</div>
-                <div class="top-price-val" style="font-size:1.6rem;">{rsi_val:.0f}</div>
-                <div class="{"txt-green" if rsi_val < 30 else ("txt-red" if rsi_val > 70 else "txt-yellow")}">{"과매도" if rsi_val < 30 else ("과매수" if rsi_val > 70 else "중립")}</div>
+                <div class="card-title">52주 고점 대비</div>
+                <div class="top-price-val" style="font-size:1.4rem;">{format_price(high_52, symbol)}</div>
+                <div class="txt-red">{((curr_price-high_52)/high_52)*100:.1f}% 하락</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
+        # 지표 분석 부분 복구!
+        st.markdown("<div class='section-title'>추세 및 지표 분석</div>", unsafe_allow_html=True)
+        ma_status = "상승 추세" if curr_price > last['MA20'] else "하락 추세"
+        m_txt = "매수 신호" if macd_val > sig_val else "매도 신호"
+        
+        st.markdown(f"""
+        <div class="grid-2">
+            <div class="vip-card">
+                <span class="dot {"dot-green" if "상승" in ma_status else "dot-red"}"></span>
+                <div class="card-title">이동평균 (20일)</div>
+                <div class="card-value">{ma_status}</div>
+                <div class="card-desc">현재가가 20일선 {"위" if "상승" in ma_status else "아래"}에 머물고 있습니다.</div>
+            </div>
+            <div class="vip-card">
+                <span class="dot {"dot-green" if rsi_val < 30 else ("dot-red" if rsi_val > 70 else "dot-yellow")}"></span>
+                <div class="card-title">RSI (14)</div>
+                <div class="card-value">RSI {rsi_val:.0f}</div>
+                <div class="card-desc">{"과매도" if rsi_val < 30 else ("과매수" if rsi_val > 70 else "중립")} 구간에 진입해 있습니다.</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 주요 지지/저항 복구!
+        st.markdown("<div class='section-title'>주요 지지 / 저항 레벨</div>", unsafe_allow_html=True)
+        piv = (float(last['High']) + float(last['Low']) + curr_price) / 3
+        s1 = 2 * piv - float(last['High'])
+        s2 = piv - (float(last['High']) - float(last['Low']))
+        r1 = 2 * piv - float(last['Low'])
+        r2 = piv + (float(last['High']) - float(last['Low']))
+        
+        st.markdown(f"""
+        <div class="grid-3">
+            <div class="pivot-box bg-sup"><div class="pv-title">지지 2</div><div class="pv-val">{format_price(s2, symbol)}</div></div>
+            <div class="pivot-box bg-sup"><div class="pv-title">지지 1</div><div class="pv-val">{format_price(s1, symbol)}</div></div>
+            <div class="pivot-box bg-piv"><div class="pv-title">피벗 (중심)</div><div class="pv-val">{format_price(piv, symbol)}</div></div>
+        </div>
+        <div class="grid-3">
+            <div class="pivot-box bg-res"><div class="pv-title">저항 1</div><div class="pv-val">{format_price(r1, symbol)}</div></div>
+            <div class="pivot-box bg-res"><div class="pv-title">저항 2</div><div class="pv-val">{format_price(r2, symbol)}</div></div>
+            <div class="pivot-box bg-ath"><div class="pv-title">52주 고점</div><div class="pv-val">{format_price(high_52, symbol)}</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # AI 리포트
         st.markdown("<div class='section-title'>AI 투자 전략 리포트</div>", unsafe_allow_html=True)
         st.markdown(f"""
         <div class="vip-card">
