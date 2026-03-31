@@ -69,28 +69,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 🔍 2. 검색 및 기호 맵핑
-SYMBOL_MAP = {
-    "삼성전자": "005930.KS", "삼전": "005930.KS",
-    "SK하이닉스": "000660.KS", "하이닉스": "000660.KS", "sk하이닉스": "000660.KS",
-    "NVDA": "NVDA", "엔비디아": "NVDA",
-    "TIGER 반도체TOP10": "396500.KS", "KODEX AI반도체": "439150.KS",
-    "MSFT": "MSFT", "마소": "MSFT", "META": "META", "ALAB": "ALAB"
-}
+# ... (위쪽 import 및 CSS 생략) ...
+
+# 🔍 2. 스마트 검색창 (CSV 기반 자동완성)
+@st.cache_data
+def load_tickers():
+    try:
+        # 내 컴퓨터(또는 깃허브)에 있는 CSV 파일을 0.01초 만에 읽어옵니다.
+        return pd.read_csv("krx_tickers.csv")
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["name", "ticker"])
+
+df_tickers = load_tickers()
 
 col_search, col_btn = st.columns([4, 1])
 with col_search:
-    search_query = st.text_input("종목 검색", "엔비디아", label_visibility="collapsed")
+    query = st.text_input("종목 검색", "", placeholder="예: 삼성전자, 반도체, NVDA", label_visibility="collapsed")
 with col_btn:
     st.button("🔄 갱신")
 
-clean_query = search_query.replace(" ", "")
-symbol = SYMBOL_MAP.get(clean_query, clean_query.upper())
+# 💡 유저님이 설계한 검색 & 선택 로직
+if query:
+    # 띄어쓰기 무시하고 검색되도록 처리
+    clean_query = query.replace(" ", "").upper()
+    mask = df_tickers["name"].str.replace(" ", "").str.upper().str.contains(clean_query, na=False)
+    results = df_tickers[mask]
 
-# 원화(₩)인지 달러($)인지 판별 함수
-def format_price(val, sym):
-    if ".KS" in sym or ".KQ" in sym: return f"₩{val:,.0f}"
-    return f"${val:,.2f}"
+    if not results.empty:
+        # 검색 결과가 있으면 셀렉트박스로 보여줌
+        selected_name = st.selectbox("👇 검색 결과에서 선택하세요", results["name"].tolist())
+        symbol = results[results["name"] == selected_name]["ticker"].values[0]
+        search_query = selected_name # 화면 표시용 이름
+    else:
+        # CSV에 없는 종목(예: NVDA, AAPL 등 미국주식)이면 입력한 그대로 야후에 넘김
+        symbol = query.upper()
+        search_query = query.upper()
+else:
+    # 아무것도 안 쳤을 때 기본값
+    symbol = "396500.KS"
+    search_query = "TIGER 반도체TOP10"
+
+# ... (이하 🛡️ 3. 데이터 로드 및 UI 렌더링 코드는 기존과 완전 동일) ...
 
 # 🛡️ 3. 데이터 로드 (캐싱 + 상세 정보)
 @st.cache_data(ttl=600)
