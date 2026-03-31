@@ -32,24 +32,29 @@ def get_investor_data(symbol):
         "appkey": APP_KEY,
         "appsecret": APP_SECRET,
         "tr_id": "FHKST01010900",
-        "custtype": "P" # KIS 정책상 개인(P) 헤더가 필요할 수 있어 추가함
+        "custtype": "P"
     }
     params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
     
     try:
         res = requests.get(url, headers=headers, params=params)
-        
-        # 🚨 [디버그 추가] 한투가 에러를 뱉으면 화면에 띄웁니다
         json_data = res.json()
+        
         if 'output' not in json_data:
             st.error(f"🛑 한투 API 거절 사유: {res.text}")
             return None
-        # --------------------------------------------------
             
         data = json_data['output']
         df = pd.DataFrame(data)
-        cols = ['stck_bsop_date', 'prdy_vrss', 'stck_prpr', 'frgn_ntby_qty', 'orgn_ntby_qty', 'ant_ntby_qty', 'acml_vol']
-        for col in cols: df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 💡 [수정됨] 한투 API 실제 응답 키값으로 완벽하게 맞춤 (stck_clpr, prsn_ntby_qty)
+        cols = ['stck_bsop_date', 'prdy_vrss', 'stck_clpr', 'frgn_ntby_qty', 'orgn_ntby_qty', 'prsn_ntby_qty', 'acml_vol']
+        
+        # 존재하는 컬럼만 안전하게 숫자로 변환 (에러 원천 차단)
+        for col in cols: 
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                
         return df.head(3)
     except Exception as e:
         st.error(f"🛑 처리 중 에러 발생: {e}")
@@ -59,10 +64,12 @@ def analyze_investor_flow(df, is_mirrored=False, leader_name=""):
     if df is None or df.empty: return "수급 데이터를 불러올 수 없습니다."
     
     today = df.iloc[0]
-    f_qty = today['frgn_ntby_qty']
-    o_qty = today['orgn_ntby_qty']
-    a_qty = today['ant_ntby_qty']
-    vol = today['acml_vol']
+    
+    # 💡 [방어] 키값이 없어도 뻗지 않고 0으로 처리하게끔 안전장치 추가
+    f_qty = today.get('frgn_ntby_qty', 0)
+    o_qty = today.get('orgn_ntby_qty', 0)
+    a_qty = today.get('prsn_ntby_qty', 0)  # 개인(prsn)
+    vol = today.get('acml_vol', 0)
     
     f_ratio = (f_qty / vol) * 100 if vol > 0 else 0
     strength_txt = "강력 매집" if f_ratio >= 5 else ("압도적 주도" if f_ratio >= 10 else "참여 중")
