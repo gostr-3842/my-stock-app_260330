@@ -9,7 +9,7 @@ def format_price(val, symbol):
 
 @st.cache_data
 def load_tickers():
-    file_name = "korean_tickers.csv"
+    file_name = "krx_tickers.csv"
     
     # 1. 파일 존재 여부 1차 방어
     if not os.path.exists(file_name):
