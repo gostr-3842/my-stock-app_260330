@@ -49,7 +49,6 @@ st.markdown("""
 # 🔍 2. 탑다운(Top-Down) 입력부
 df_tickers = load_tickers()
 
-# [1단계] 매크로 환경 세팅
 macro_options = [
     "특이사항 없음 (기본 차트 및 수급 중심 분석)",
     "전쟁 장기화 및 환율 급등 (위험자산 회피, 극도로 보수적 접근)",
@@ -60,7 +59,6 @@ macro_options = [
 macro_selected = st.selectbox("🌍 시장 전체 매크로 상황", macro_options)
 macro_keyword = "" if "특이사항 없음" in macro_selected else macro_selected
 
-# [2단계] 종목 입력 및 선택
 query = st.text_input("🔍 종목 검색", "", placeholder="예: 삼성전자, 하이닉스")
 symbol = ""
 search_query = ""
@@ -78,7 +76,6 @@ if query:
         symbol = query.upper()
         search_query = query.upper()
 
-# [3단계] 모바일에 최적화된 검색 버튼 
 if st.button("검색", use_container_width=True):
     if query: 
         st.session_state['analyze_mode'] = True
@@ -89,7 +86,6 @@ if st.button("검색", use_container_width=True):
         st.warning("종목을 먼저 입력해 주세요!")
         st.session_state['analyze_mode'] = False
 
-# 💡 [핵심] 안내 문구가 들어갈 단 하나의 공간
 info_placeholder = st.empty()
 
 # 📊 3. 대시보드 렌더링부
@@ -102,7 +98,6 @@ if st.session_state.get('analyze_mode', False):
         df, fetch_time = load_stock_data(current_symbol)
         
         if df is not None:
-            # ✅ 검색 후: 시간이 포함된 문구로 업데이트
             info_placeholder.markdown(f"<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다. <span style='opacity:0.7;'>(마지막 업데이트: {fetch_time})</span></div>", unsafe_allow_html=True)
             
             investor_df = get_investor_data(current_symbol)
@@ -199,7 +194,11 @@ if st.session_state.get('analyze_mode', False):
                 for _, row in investor_df.iterrows():
                     date_val = str(row['stck_bsop_date'])
                     date_str = f"{date_val[4:6]}/{date_val[6:8]}"
-                    qty = row['frgn_ntby_qty']
+                    
+                    # 🚨 [방어 로직] NaN 확인 후 정수로 변환
+                    raw_qty = row.get('frgn_ntby_qty', 0)
+                    qty = int(raw_qty) if pd.notna(raw_qty) else 0
+                    
                     color = "txt-green" if qty > 0 else "txt-red"
                     inv_rows += f"<div style='display:flex; justify-content:space-between; margin-bottom:5px;'><span>{date_str}</span><span class='{color}'>{qty:+,d} 주</span></div>"
             else:
@@ -214,7 +213,7 @@ if st.session_state.get('analyze_mode', False):
             """, unsafe_allow_html=True)
         else:
             st.error("데이터 로드 실패")
+            info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
 else:
-    # ✅ 검색 전: 기본 안내 문구만 노출
     info_placeholder.markdown("<div style='text-align: center; color: #9ca3af; font-size: 0.85rem; margin-top: -10px; margin-bottom: 20px;'>⏱️ 데이터는 10분 단위로 갱신됩니다.</div>", unsafe_allow_html=True)
     st.info("💡 위에서 매크로 환경과 종목을 설정한 뒤 '검색' 버튼을 눌러주세요.")
