@@ -64,7 +64,7 @@ def get_market_status():
         else:
             results[name] = 0
             
-    # 선물 수급 추정치 방어 로직 (추후 진짜 선물 TR 연동 시 수정될 부분)
+    # 선물 수급 추정치 방어 로직 (추후 진짜 선물 TR 연동 전까지 야간에도 에러 안 나도록 방어)
     results['FUTURES'] = results.get('KOSPI', 0) * 2 
     return results
 
