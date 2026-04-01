@@ -51,9 +51,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 🏁 [NEW] 상단 시장 관제 바 (에러 방어 로직 추가)
-try:
-    m_data = get_market_status()
+# 🏁 상단 시장 관제 바
+m_data = get_market_status()
+
+if m_data.get("ERROR"):
+    st.error("🚨 Streamlit Cloud 설정(Settings -> Secrets)에서 KIS_APP_KEY와 KIS_APP_SECRET을 등록해주세요.")
+else:
     st.markdown(f"""
     <div class="market-bar">
         <div class="market-item">
@@ -70,8 +73,6 @@ try:
         </div>
     </div>
     """, unsafe_allow_html=True)
-except Exception as e:
-    st.warning("시장 데이터를 불러오는 중입니다.")
 
 # 🔍 2. 종목 검색부
 df_tickers = load_tickers()
@@ -122,7 +123,8 @@ if st.session_state.get('analyze_mode', False):
             
             investor_df = get_investor_data(current_symbol)
             is_mirrored = False
-            if investor_df is None or (not investor_df.empty and investor_df.iloc[0]['frgn_ntby_qty'] == 0):
+            # 만약 수급 데이터가 없거나 첫 행이 0이라면 삼성전자 데이터로 미러링 시도
+            if investor_df is None or (not investor_df.empty and int(pd.to_numeric(investor_df.iloc[0]['frgn_ntby_qty'], errors='coerce')) == 0):
                 investor_df = get_investor_data("005930.KS")
                 is_mirrored = True
             
@@ -217,7 +219,7 @@ if st.session_state.get('analyze_mode', False):
                     d_str = f"{date_val[4:6]}/{date_val[6:8]}"
                     
                     raw_qty = row.get('frgn_ntby_qty', 0)
-                    qty = int(raw_qty) if pd.notna(raw_qty) else 0
+                    qty = int(pd.to_numeric(raw_qty, errors='coerce')) if pd.notna(raw_qty) else 0
                     
                     if d_str == today_str and qty == 0:
                         display_qty = "집계 중(잠정)"
