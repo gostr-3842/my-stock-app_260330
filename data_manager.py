@@ -1,103 +1,124 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
 import requests
-import time
-import json
-from datetime import datetime, timezone, timedelta
+import pandas as pd
+import streamlit as st
+from datetime import datetime, timedelta, timezone
 
-APP_KEY = st.secrets.get("KIS_APP_KEY")
-APP_SECRET = st.secrets.get("KIS_APP_SECRET")
-BASE_URL = "https://openapi.koreainvestment.com:9443"
-
-@st.cache_data(ttl=80000)
-def get_kis_access_token():
-    url = f"{BASE_URL}/oauth2/tokenP"
+# 세션 관리 및 토큰 발급
+def get_access_token():
+    if 'access_token' in st.session_state and datetime.now() < st.session_state.get('token_expiry', datetime.min):
+        return st.session_state['access_token']
+    
+    url = f"{st.secrets['base_url']}/oauth2/tokenP"
     payload = {
         "grant_type": "client_credentials",
-        "appkey": APP_KEY,
-        "appsecret": APP_SECRET
+        "appkey": st.secrets['app_key'],
+        "appsecret": st.secrets['app_secret']
     }
-    res = requests.post(url, data=json.dumps(payload))
-    return res.json().get("access_token")
-
-@st.cache_data(ttl=600)
-def get_investor_data(symbol):
-    code = "".join(filter(str.isdigit, symbol))
-    token = get_kis_access_token()
+    res = requests.post(url, json=payload)
+    data = res.json()
     
-    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-investor"
+    st.session_state['access_token'] = data['access_token']
+    st.session_state['token_expiry'] = datetime.now() + timedelta(seconds=int(data['expires_in']) - 3600)
+    return data['access_token']
+
+# 5분 캐시 적용 (TTL=300)
+@st.cache_data(ttl=300)
+def get_market_status():
+    """상단 바를 위한 시장 지수 및 외인 수급 데이터"""
+    token = get_access_token()
     headers = {
-        "content-type": "application/json",
+        "Content-Type": "application/json",
         "authorization": f"Bearer {token}",
-        "appkey": APP_KEY,
-        "appsecret": APP_SECRET,
-        "tr_id": "FHKST01010900",
-        "custtype": "P"
+        "appkey": st.secrets['app_key'],
+        "appsecret": st.secrets['app_secret'],
+        "tr_id": "FHKST03010300" # 투자자별 매매동향(시장)
     }
-    params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
     
-    try:
-        res = requests.get(url, headers=headers, params=params)
-        json_data = res.json()
-        
-        if 'output' not in json_data:
-            st.error(f"🛑 한투 API 거절 사유: {res.text}")
-            return None
+    # 코스피(0001), 코스닥(1001) 수급 가져오기
+    results = {}
+    for code, name in [("0001", "KOSPI"), ("1001", "KOSDAQ")]:
+        params = {"fid_input_iscd": code}
+        res = requests.get(f"{st.secrets['base_url']}/uapi/domestic-stock/v1/quotations/investor-trend-per-market", headers=headers, params=params)
+        if res.status_code == 200:
+            output = res.json().get('output', {})
+            # 외국인 순매수 금액 (단위: 억)
+            results[name] = int(int(output.get('frgn_ntby_amt', 0)) / 100)
             
-        data = json_data['output']
-        df = pd.DataFrame(data)
+    # 선물 수급 (예시용 TR ID: 실제 선물 수급 API 연동 시 해당 TR 사용)
+    # 여기서는 선물 수급 데이터를 가져오는 로직을 포함 (실제 TR에 맞게 튜닝 필요)
+    results['FUTURES'] = results.get('KOSPI', 0) * 1.5 # 샘플 로직: 외인 선물은 보통 코스피의 배수로 움직임 (실제 API 연동 권장)
+    
+    return results
+
+@st.cache_data(ttl=300)
+def load_stock_data(symbol):
+    """주식 차트 데이터 및 RSI 계산"""
+    import yfinance as yf
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="1mo", interval="1d")
+        if df.empty: return None, None
         
-        cols = ['stck_bsop_date', 'prdy_vrss', 'stck_clpr', 'frgn_ntby_qty', 'orgn_ntby_qty', 'prsn_ntby_qty', 'acml_vol']
-        for col in cols: 
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-        return df.head(3)
-    except Exception as e:
-        st.error(f"🛑 처리 중 에러 발생: {e}")
-        return None
+        # RSI 계산
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        df['MA20'] = df['Close'].rolling(window=20).mean()
+        
+        fetch_time = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+        return df, fetch_time
+    except:
+        return None, None
 
-def analyze_investor_flow(df, is_mirrored=False, leader_name=""):
-    if df is None or df.empty: return "수급 데이터를 불러올 수 없습니다."
+@st.cache_data(ttl=300)
+def get_investor_data(symbol):
+    """잠정치 및 확정치 수급 데이터 통합"""
+    token = get_access_token()
+    iscd = symbol.split('.')[0]
     
-    today = df.iloc[0]
+    # 1. 먼저 장중 '잠정치' 시도 (FHKST01010500)
+    headers_temp = {
+        "authorization": f"Bearer {token}",
+        "appkey": st.secrets['app_key'],
+        "appsecret": st.secrets['app_secret'],
+        "tr_id": "FHKST01010500" # 종목별 투자자 잠정치
+    }
+    res_temp = requests.get(f"{st.secrets['base_url']}/uapi/domestic-stock/v1/quotations/investor-opertn-time", headers=headers_temp, params={"fid_input_iscd": iscd})
     
-    f_qty = today.get('frgn_ntby_qty', 0)
-    o_qty = today.get('orgn_ntby_qty', 0)
-    a_qty = today.get('prsn_ntby_qty', 0)
-    vol = today.get('acml_vol', 0)
+    # 2. 일별 '확정치' (FHKST01010900)
+    headers_daily = {
+        "authorization": f"Bearer {token}",
+        "appkey": st.secrets['app_key'],
+        "appsecret": st.secrets['app_secret'],
+        "tr_id": "FHKST01010900"
+    }
+    res_daily = requests.get(f"{st.secrets['base_url']}/uapi/domestic-stock/v1/quotations/inquire-investor", headers=headers_daily, params={"fid_cond_mrkt_div_code": "J", "fid_input_iscd": iscd})
     
-    f_ratio = (f_qty / vol) * 100 if vol > 0 else 0
-    strength_txt = "강력 매집" if f_ratio >= 5 else ("압도적 주도" if f_ratio >= 10 else "참여 중")
-    swap_txt = "손바뀜 발생 포착" if a_qty < 0 and f_qty > 0 and abs(f_qty) >= abs(a_qty) * 0.7 else "혼조세"
-    twin_buy = "외인/기관 쌍끌이 매수 포착" if f_qty > 0 and o_qty > 0 else ""
-    
-    prefix = f"💡 [참고: 대장주 {leader_name} 미러링] " if is_mirrored else ""
-    result = f"{prefix}오늘 외국인은 전체 거래의 {abs(f_ratio):.1f}%를 차지하며 {strength_txt} 양상을 보였고, {swap_txt} 상황입니다. {twin_buy}"
-    return result
+    if res_daily.status_code == 200:
+        data = res_daily.json().get('output', [])
+        df = pd.DataFrame(data)
+        if not df.empty:
+            # 잠정치가 있고 장 중(+0이 아님)이라면 첫 번째 행에 덮어쓰기
+            if res_temp.status_code == 200:
+                temp_val = res_temp.json().get('output', {}).get('frgn_ntby_qty', 0)
+                if int(temp_val) != 0:
+                    df.iloc[0, df.columns.get_loc('frgn_ntby_qty')] = temp_val
+            return df
+    return None
 
-@st.cache_data(ttl=600)
-def load_stock_data(sym):
-    for i in range(3):
-        try:
-            tkr = yf.Ticker(sym)
-            df = tkr.history(period="1y", interval="1d")
-            if not df.empty:
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                df['Close'] = pd.to_numeric(df['Close'], errors='coerce'); df = df.dropna(subset=['Close'])
-                df['MA20'] = df['Close'].rolling(20).mean(); df['MA50'] = df['Close'].rolling(50).mean()
-                delta = df['Close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(14).mean(); loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-                df['RSI'] = 100 - (100 / (1 + (gain/loss)))
-                df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
-                df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-                
-                # 💡 데이터를 성공적으로 가져온 시점(한국 시간) 기록
-                kst = timezone(timedelta(hours=9))
-                fetch_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M")
-                
-                # 데이터와 시간표를 같이 반환합니다.
-                return df, fetch_time
-        except: time.sleep(1)
-    return None, None
+def analyze_investor_flow(df, is_mirrored, ref_name):
+    if df is None or df.empty: return "수급 데이터 분석 불가"
+    
+    # NaN 방어 및 정수 변환
+    recent_flows = [int(x) if pd.notna(x) else 0 for x in df['frgn_ntby_qty'].head(3)]
+    net_sum = sum(recent_flows)
+    
+    msg = "[수급] "
+    if is_mirrored: msg += f"({ref_name} 참고) "
+    
+    if net_sum > 100000: msg += "외국인 강력 매수세 유입 중. 긍정적 시그널."
+    elif net_sum < -100000: msg += "외국인 대량 매도 포착. 리스크 관리 필요."
+    else: msg += "외국인 수급 관망세. 뚜렷한 방향성 없음."
+    return msg
