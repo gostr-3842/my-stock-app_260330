@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone, timedelta
 
 from utils import format_price, load_tickers
-from data_manager import load_stock_data, get_investor_data, analyze_investor_flow, get_market_status
+from data_manager import load_stock_data, get_investor_data, analyze_investor_flow, get_market_status, safe_int
 from ai_engine import get_ai_scenarios
 
 # 📱 1. VIP 스타일 UI 설정
@@ -123,8 +124,14 @@ if st.session_state.get('analyze_mode', False):
             
             investor_df = get_investor_data(current_symbol)
             is_mirrored = False
-            # 만약 수급 데이터가 없거나 첫 행이 0이라면 삼성전자 데이터로 미러링 시도
-            if investor_df is None or (not investor_df.empty and int(pd.to_numeric(investor_df.iloc[0]['frgn_ntby_qty'], errors='coerce')) == 0):
+            
+            # [핵심 수술 부위] 에러를 뿜던 127번 라인을 안전하게 분해
+            first_row_val = 0
+            if investor_df is not None and not investor_df.empty:
+                first_row_val = safe_int(investor_df.iloc[0].get('frgn_ntby_qty', 0))
+            
+            # 수급 데이터가 없거나 0으로 채워진 상태라면 삼성전자 데이터로 미러링 시도
+            if investor_df is None or (not investor_df.empty and first_row_val == 0):
                 investor_df = get_investor_data("005930.KS")
                 is_mirrored = True
             
@@ -218,8 +225,8 @@ if st.session_state.get('analyze_mode', False):
                     date_val = str(row['stck_bsop_date'])
                     d_str = f"{date_val[4:6]}/{date_val[6:8]}"
                     
-                    raw_qty = row.get('frgn_ntby_qty', 0)
-                    qty = int(pd.to_numeric(raw_qty, errors='coerce')) if pd.notna(raw_qty) else 0
+                    # [방어막 적용] 어떤 값이 오든 안전하게 정수(또는 0)로 변환
+                    qty = safe_int(row.get('frgn_ntby_qty', 0))
                     
                     if d_str == today_str and qty == 0:
                         display_qty = "집계 중(잠정)"
